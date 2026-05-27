@@ -56,8 +56,8 @@ If you want to discuss whether a change is in scope, open an issue first.
 ## What takes longer
 
 - Anything touching the audit record shape, configuration surface, or
-  telemetry stub. These are contract-level changes and require a spec
-  amendment in the closed Posteria spec repo.
+  telemetry stub. These are contract-level changes and require a contract
+  revision before code review begins.
 - Anything that would require a `record_version` bump.
 - Anything that adds a new dependency.
 

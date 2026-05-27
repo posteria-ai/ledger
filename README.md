@@ -5,19 +5,15 @@ intercepts agent I/O at the call boundary, writes a VDC-shaped audit record
 to a local append-only file, and returns the call unchanged. It does not
 evaluate policy. It does not block, redact, or modify anything.
 
-**Status:** v0.1 scaffolding. The runtime implementation lands under task
-OM003; this repository currently holds the package scaffolding (LICENSE,
-README, CONTRIBUTING, CI). The canonical contract for the v0.1 runtime is
-maintained in the closed Posteria spec packet `specs/007-observer-mode-and-positioning/contracts/observer-api.md`
-and will be mirrored here when v0.1.0 publishes.
+**Status:** pre-v0.1.0. Runtime ships with v0.1.0.
 
 **License:** MIT.
 
 ## What Observer is
 
-Observer is the open-sourced subset of Posteria. It records what agents do at
-the call boundary, in a record shape that is forward-compatible with the
-closed Posteria policy engine but does not require it.
+Observer is the open-source subset of Posteria. It records what agents do at
+the call boundary, in a record shape that is forward-compatible with
+Posteria's commercial policy engine but does not require it.
 
 - **Decision function:** identity. Every intercepted call → `allow` + a
   recorded audit record. No payload mutation, ever.
@@ -36,14 +32,15 @@ Observer is deliberately not a policy engine. It does not:
 - Block, refuse, redact, or modify calls.
 - Mint, sign, or attest VDCs.
 - Open network sockets or transmit any audit content off-host.
-- Grant interoperability with, or licensed use of, the closed Posteria
+- Grant interoperability with, or licensed use of, Posteria's commercial
   policy engine, mandate issuance surface, constitution interpreter, or
-  commercial server.
+  server.
 
-For the explicit non-claims list, see `LIMITATIONS.md` (lands under task
-OM004).
+For the explicit non-claims list, see `LIMITATIONS.md` (ships with v0.1.0).
 
-## Install (forthcoming, v0.1.0)
+## Install
+
+Not yet published. Once v0.1.0 ships:
 
 ```sh
 npm install @posteria/observer
@@ -129,10 +126,10 @@ v0.1.0 release.
 
 See `CONTRIBUTING.md`.
 
-## Relationship to closed Posteria
+## Relationship to commercial Posteria
 
-Observer is the open carve-out of Posteria. The closed surface — policy
-engine, constitution interpreter, mandate issuance, VDC attestation,
-commercial server — is not open-sourced and is not licensed via this
-repository. Audit records produced by Observer are MIT-licensed; consuming
-them with the closed Posteria server is a separate commercial relationship.
+Observer is the open carve-out of Posteria. The commercial surface — policy
+engine, constitution interpreter, mandate issuance, VDC attestation, server —
+is not open-sourced and is not licensed via this repository. Audit records
+produced by Observer are MIT-licensed; consuming them with the commercial
+Posteria server is a separate commercial relationship.
