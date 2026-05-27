@@ -7,29 +7,7 @@ on:
     branches: [main]
 
 jobs:
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-      - name: Install
-        run: |
-          if [ -f package.json ]; then
-            npm ci || npm install
-          else
-            echo "No package.json yet (scaffolding phase, pre-OM003). Skipping install."
-          fi
-      - name: Lint
-        run: |
-          if [ -f package.json ] && npm run | grep -qE '^\s*lint'; then
-            npm run lint
-          else
-            echo "No lint script yet (scaffolding phase). Skipping."
-          fi
-
-  test:
+  build-test:
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -39,34 +17,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
-      - name: Install
-        run: |
-          if [ -f package.json ]; then
-            npm ci || npm install
-          else
-            echo "No package.json yet (scaffolding phase, pre-OM003). Skipping install."
-          fi
-      - name: Test
-        run: |
-          if [ -f package.json ] && npm run | grep -qE '^\s*test'; then
-            npm test
-          else
-            echo "No test script yet (scaffolding phase). Skipping."
-          fi
-
-  conformance:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-      - name: Conformance suite
-        run: |
-          if [ -f test/conformance/run.js ]; then
-            node test/conformance/run.js
-          elif [ -f package.json ] && npm run | grep -qE '^\s*conformance'; then
-            npm run conformance
-          else
-            echo "Conformance suite not present yet (lands with OM003 / v0.1.0). Skipping."
-          fi
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm run typecheck
+      - run: npm test
