@@ -22,7 +22,7 @@
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",
-    "test": "tsc --project tsconfig.test.json && node --test .test-dist/test/index.test.js"
+    "test": "tsc --project tsconfig.test.json && node --test '.test-dist/test/**/*.test.js'"
   },
   "devDependencies": {
     "@types/node": "^22.15.29",
