@@ -69,7 +69,9 @@ class JsonlAuditSink implements AuditSink {
   readonly #path: string;
   readonly #onReopen: AuditSinkOptions["onReopen"];
   #queue: string[] = [];
-  #draining: Promise<void> | null = null;
+  // Serializes every fd operation (drain, reopen, close) so writes never run
+  // concurrently with a rotation swap — see reopen() for why that matters.
+  #chain: Promise<void> = Promise.resolve();
   #closed = false;
   #closePromise: Promise<void> | null = null;
   #sighupHandler: (() => void) | null = null;
@@ -110,37 +112,44 @@ class JsonlAuditSink implements AuditSink {
       throw new Error("cannot write to a closed audit sink");
     }
     this.#queue.push(`${JSON.stringify(record)}\n`);
-    void this.#drain();
+    // Fire-and-forget: the operator's durability primitives are flush()/close().
+    this.#schedule(() => this.#drainAll()).catch(() => {});
   }
 
-  #drain(): Promise<void> {
-    if (this.#draining) return this.#draining;
-    const run = (async () => {
-      while (this.#queue.length > 0) {
-        const batch = this.#queue.splice(0).join("");
-        await writeAll(this.#fd, batch);
-      }
-    })();
-    this.#draining = run.finally(() => {
-      this.#draining = null;
-    });
-    return this.#draining;
+  /** Run `op` after all previously-scheduled fd operations, never concurrently. */
+  #schedule<T>(op: () => Promise<T>): Promise<T> {
+    const result = this.#chain.then(op, op);
+    this.#chain = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
   }
 
-  async flush(): Promise<void> {
-    while (this.#queue.length > 0 || this.#draining) {
-      await this.#drain();
+  async #drainAll(): Promise<void> {
+    while (this.#queue.length > 0) {
+      const batch = this.#queue.splice(0).join("");
+      await writeAll(this.#fd, batch);
     }
-    await fsyncFd(this.#fd);
   }
 
-  async reopen(): Promise<void> {
-    if (this.#closed) return;
-    await this.flush();
-    const previousFd = this.#fd;
-    this.#fd = openSync(this.#path, "a");
-    await closeFd(previousFd);
-    this.#onReopen?.({ previousFd, fd: this.#fd });
+  flush(): Promise<void> {
+    return this.#schedule(async () => {
+      await this.#drainAll();
+      await fsyncFd(this.#fd);
+    });
+  }
+
+  reopen(): Promise<void> {
+    if (this.#closed) return Promise.resolve();
+    return this.#schedule(async () => {
+      await this.#drainAll();
+      await fsyncFd(this.#fd);
+      const previousFd = this.#fd;
+      this.#fd = openSync(this.#path, "a");
+      await closeFd(previousFd);
+      this.#onReopen?.({ previousFd, fd: this.#fd });
+    });
   }
 
   async close(): Promise<void> {
@@ -153,10 +162,11 @@ class JsonlAuditSink implements AuditSink {
       process.removeListener("SIGHUP", this.#sighupHandler);
       this.#sighupHandler = null;
     }
-    this.#closePromise = (async () => {
-      await this.flush();
+    this.#closePromise = this.#schedule(async () => {
+      await this.#drainAll();
+      await fsyncFd(this.#fd);
       await closeFd(this.#fd);
-    })();
+    });
     await this.#closePromise;
   }
 }

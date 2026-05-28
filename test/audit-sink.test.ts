@@ -156,6 +156,23 @@ describe("audit sink — SIGHUP re-open", () => {
     assert.equal(readLines(path).length, 1);
   });
 
+  it("does not lose or misdirect records written concurrently with reopen", async () => {
+    const path = join(dir, "audit.jsonl");
+    const sink = createAuditSink({ path, handleSighup: false });
+    const n = 500;
+    const rotateAt = 250;
+    for (let i = 0; i < n; i++) {
+      sink.write({ seq: i });
+      if (i === rotateAt) void sink.reopen(); // interleave a rotation mid-stream
+    }
+    await sink.close();
+
+    const lines = readLines(path);
+    assert.equal(lines.length, n);
+    const seqs = new Set(lines.map((l) => JSON.parse(l).seq));
+    assert.equal(seqs.size, n);
+  });
+
   it("reopen() acquires a new fd at the same path", async () => {
     const path = join(dir, "audit.jsonl");
     const sink = createAuditSink({ path, handleSighup: false });
