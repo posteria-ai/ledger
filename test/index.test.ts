@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { rmSync } from "node:fs";
 import { describe, it } from "node:test";
 
 import {
@@ -12,11 +13,13 @@ import {
 } from "../src/index.js";
 
 describe("createObserver", () => {
-  it("exposes the v0.1 public API stub", () => {
-    assert.throws(
-      () => createObserver(),
-      /not implemented/i,
-    );
+  it("returns a working Observer without throwing", async () => {
+    const observer = createObserver();
+    assert.equal(typeof observer.observe, "function");
+    assert.equal(typeof observer.close, "function");
+    assert.equal(observer.config.audit_stream_path, DEFAULT_AUDIT_STREAM_PATH);
+    await observer.close();
+    rmSync(DEFAULT_AUDIT_STREAM_PATH, { force: true });
   });
 });
 
