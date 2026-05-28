@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdtempSync,
   readFileSync,
+  renameSync,
   rmSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -179,6 +180,30 @@ describe("audit sink — SIGHUP re-open", () => {
     assert.equal(seqs.size, n);
   });
 
+  it("routes post-rotation writes to the new file at the path (rename + reopen)", async () => {
+    const path = join(dir, "audit.jsonl");
+    const rotated = join(dir, "audit.jsonl.1");
+    const sink = createAuditSink({ path, handleSighup: false });
+
+    sink.write({ phase: "before" });
+    await sink.flush();
+    // External rotation tool moves the current file aside, then signals reopen.
+    renameSync(path, rotated);
+    const done = sink.reopen();
+    sink.write({ phase: "after" }); // enqueued after the reopen request
+    await done;
+    await sink.close();
+
+    assert.deepEqual(
+      readLines(rotated).map((l) => JSON.parse(l).phase),
+      ["before"],
+    );
+    assert.deepEqual(
+      readLines(path).map((l) => JSON.parse(l).phase),
+      ["after"],
+    );
+  });
+
   it("reopen() acquires a new fd at the same path", async () => {
     const path = join(dir, "audit.jsonl");
     const sink = createAuditSink({ path, handleSighup: false });
@@ -211,6 +236,16 @@ describe("audit sink — close idempotency", () => {
     closeSync(sink.fd);
     sink.write({ seq: 1 });
     await assert.rejects(() => sink.flush());
+  });
+
+  it("rejects values that do not stringify to JSON", async () => {
+    const path = join(dir, "audit.jsonl");
+    const sink = createAuditSink({ path, handleSighup: false });
+    assert.throws(() => sink.write(undefined), /JSON-serializable/);
+    assert.throws(() => sink.write(() => {}), /JSON-serializable/);
+    assert.throws(() => sink.write(Symbol("x")), /JSON-serializable/);
+    await sink.close();
+    assert.equal(readLines(path).length, 0);
   });
 
   it("write after close throws", async () => {

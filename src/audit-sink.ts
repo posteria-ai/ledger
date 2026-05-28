@@ -64,14 +64,23 @@ function closeFd(fd: number): Promise<void> {
   });
 }
 
+type Command =
+  | { kind: "write"; line: string }
+  | {
+      kind: "flush" | "reopen" | "close";
+      resolve: () => void;
+      reject: (err: unknown) => void;
+    };
+
 class JsonlAuditSink implements AuditSink {
   #fd: number;
   readonly #path: string;
   readonly #onReopen: AuditSinkOptions["onReopen"];
-  #queue: string[] = [];
-  // Serializes every fd operation (drain, reopen, close) so writes never run
-  // concurrently with a rotation swap — see reopen() for why that matters.
-  #chain: Promise<void> = Promise.resolve();
+  // A single FIFO command stream. Writes coalesce into one syscall; flush /
+  // reopen / close act as ordering barriers, so a write enqueued after a
+  // reopen request can never be drained into the pre-rotation descriptor.
+  #commands: Command[] = [];
+  #pumping = false;
   #closed = false;
   #closePromise: Promise<void> | null = null;
   #sighupHandler: (() => void) | null = null;
@@ -111,52 +120,30 @@ class JsonlAuditSink implements AuditSink {
     if (this.#closed) {
       throw new Error("cannot write to a closed audit sink");
     }
-    this.#queue.push(`${JSON.stringify(record)}\n`);
-    // Fire-and-forget: the operator's durability primitives are flush()/close().
-    this.#schedule(() => this.#drainAll()).catch(() => {});
-  }
-
-  /** Run `op` after all previously-scheduled fd operations, never concurrently. */
-  #schedule<T>(op: () => Promise<T>): Promise<T> {
-    const result = this.#chain.then(op, op);
-    this.#chain = result.then(
-      () => undefined,
-      () => undefined,
-    );
-    return result;
-  }
-
-  async #drainAll(): Promise<void> {
-    while (this.#queue.length > 0) {
-      const batch = this.#queue.splice(0);
-      try {
-        await writeAll(this.#fd, batch.join(""));
-      } catch (err) {
-        // Keep unwritten records queued so a later flush()/close() can retry
-        // and so the failure is never silently dropped.
-        this.#queue = batch.concat(this.#queue);
-        throw err;
-      }
+    const json = JSON.stringify(record);
+    if (json === undefined) {
+      throw new Error(
+        "audit record is not JSON-serializable (undefined, function, or symbol)",
+      );
     }
+    this.#commands.push({ kind: "write", line: `${json}\n` });
+    this.#pump();
+  }
+
+  #barrier(kind: "flush" | "reopen"): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      this.#commands.push({ kind, resolve, reject });
+      this.#pump();
+    });
   }
 
   flush(): Promise<void> {
-    return this.#schedule(async () => {
-      await this.#drainAll();
-      await fsyncFd(this.#fd);
-    });
+    return this.#barrier("flush");
   }
 
   reopen(): Promise<void> {
     if (this.#closed) return Promise.resolve();
-    return this.#schedule(async () => {
-      await this.#drainAll();
-      await fsyncFd(this.#fd);
-      const previousFd = this.#fd;
-      this.#fd = openSync(this.#path, "a");
-      await closeFd(previousFd);
-      this.#onReopen?.({ previousFd, fd: this.#fd });
-    });
+    return this.#barrier("reopen");
   }
 
   async close(): Promise<void> {
@@ -169,12 +156,86 @@ class JsonlAuditSink implements AuditSink {
       process.removeListener("SIGHUP", this.#sighupHandler);
       this.#sighupHandler = null;
     }
-    this.#closePromise = this.#schedule(async () => {
-      await this.#drainAll();
-      await fsyncFd(this.#fd);
-      await closeFd(this.#fd);
+    this.#closePromise = new Promise<void>((resolve, reject) => {
+      this.#commands.push({ kind: "close", resolve, reject });
+      this.#pump();
     });
     await this.#closePromise;
+  }
+
+  #pump(): void {
+    if (this.#pumping) return;
+    this.#pumping = true;
+    queueMicrotask(() => {
+      void this.#run();
+    });
+  }
+
+  async #run(): Promise<void> {
+    try {
+      while (this.#commands.length > 0) {
+        if (this.#commands[0]!.kind === "write") {
+          // On write failure, stop pumping: records stay queued for retry on
+          // the next write/flush/close, avoiding a busy-loop on a stuck disk.
+          if (!(await this.#drainWrites())) break;
+        } else {
+          await this.#runBarrier(
+            this.#commands.shift() as Extract<Command, { kind: "flush" }>,
+          );
+        }
+      }
+    } finally {
+      this.#pumping = false;
+    }
+  }
+
+  /** Coalesce the leading run of write commands into one append. Returns false on failure. */
+  async #drainWrites(): Promise<boolean> {
+    const lines: string[] = [];
+    while (this.#commands[0]?.kind === "write") {
+      lines.push((this.#commands.shift() as { line: string }).line);
+    }
+    try {
+      await writeAll(this.#fd, lines.join(""));
+      return true;
+    } catch (err) {
+      // Preserve unwritten records at the front of the stream so they are
+      // never silently dropped, and surface the failure to any pending
+      // flush/reopen/close so callers are not left hanging.
+      for (let i = lines.length - 1; i >= 0; i--) {
+        this.#commands.unshift({ kind: "write", line: lines[i]! });
+      }
+      this.#rejectBarriers(err);
+      return false;
+    }
+  }
+
+  async #runBarrier(
+    cmd: Extract<Command, { kind: "flush" | "reopen" | "close" }>,
+  ): Promise<void> {
+    try {
+      await fsyncFd(this.#fd);
+      if (cmd.kind === "reopen") {
+        const previousFd = this.#fd;
+        this.#fd = openSync(this.#path, "a");
+        await closeFd(previousFd);
+        this.#onReopen?.({ previousFd, fd: this.#fd });
+      } else if (cmd.kind === "close") {
+        await closeFd(this.#fd);
+      }
+      cmd.resolve();
+    } catch (err) {
+      cmd.reject(err);
+    }
+  }
+
+  /** Reject and drop every queued barrier, leaving writes queued for retry. */
+  #rejectBarriers(err: unknown): void {
+    this.#commands = this.#commands.filter((cmd) => {
+      if (cmd.kind === "write") return true;
+      cmd.reject(err);
+      return false;
+    });
   }
 }
 
