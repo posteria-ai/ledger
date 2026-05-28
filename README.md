@@ -68,6 +68,16 @@ startup.
 
 ## Telemetry
 
+**Design choice: no-op opt-in stub, default-off.** Observer ships into a
+buyer reflex that assumes any new agent-safety library calls home. The only
+design that gets installed is one that doesn't. The flag is default-off,
+opt-in by an explicit configuration value, and even when set the v0.1 stub
+transmits nothing. Shipping the opt-in flag and the future-fields
+documentation in v0.1 — rather than introducing telemetry later as a "new"
+feature — means a future v0.2 enabling telemetry is a documented
+continuation of an opt-in surface operators already saw at install time,
+not a surprise addition.
+
 **v0.1 transmits nothing.** The telemetry stub is a no-op in v0.1
 regardless of the `enable_anon_telemetry` flag. The flag exists to surface
 the future behavior to users at install time.
