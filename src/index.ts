@@ -15,6 +15,7 @@ export interface VdcInput {
   issuer?: string | null;
   subject?: string | null;
   claims?: Record<string, unknown>;
+  [extensionKey: `x-${string}-${string}`]: unknown;
 }
 
 export interface VdcEnvelope {
@@ -22,12 +23,14 @@ export interface VdcEnvelope {
   issuer: string | null;
   subject: string | null;
   claims: Record<string, unknown>;
+  [extensionKey: `x-${string}-${string}`]: unknown;
 }
 
 export interface AuditAction {
   action_kind: string;
   action_signature: string;
   vdc?: VdcInput;
+  [extensionKey: `x-${string}-${string}`]: unknown;
 }
 
 export interface AuditRecord {
@@ -41,6 +44,7 @@ export interface AuditRecord {
   decision_reason: typeof OBSERVER_DECISION_REASON;
   observer_version: string;
   host_metadata?: Record<string, unknown>;
+  [extensionKey: `x-${string}-${string}`]: unknown;
 }
 
 export interface ObserverDecision {

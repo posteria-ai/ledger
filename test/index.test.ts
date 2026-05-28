@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  type AuditRecord,
+  type VdcEnvelope,
   createObserver,
   DEFAULT_AUDIT_STREAM_PATH,
   OBSERVER_DECISION,
@@ -36,5 +38,39 @@ describe("v0.1 contract constants", () => {
       DEFAULT_AUDIT_STREAM_PATH,
       "./posteria-observer-audit.jsonl",
     );
+  });
+});
+
+describe("x-<orgslug>-* extension namespace", () => {
+  it("accepts third-party namespaced fields at the record top level", () => {
+    const record: AuditRecord = {
+      record_version: "0.1.0",
+      record_id: "00000000-0000-4000-8000-000000000000",
+      recorded_at: "2026-05-28T00:00:00Z",
+      action_kind: "tool_call",
+      action_signature: "noop",
+      vdc: {
+        mandate_id: null,
+        issuer: null,
+        subject: null,
+        claims: {},
+      },
+      decision: "allow",
+      decision_reason: "observer_short_circuit",
+      observer_version: "0.0.0",
+      "x-acmeco-trace_id": "abc123",
+    };
+    assert.equal(record["x-acmeco-trace_id"], "abc123");
+  });
+
+  it("accepts third-party namespaced fields inside the VDC envelope", () => {
+    const vdc: VdcEnvelope = {
+      mandate_id: null,
+      issuer: null,
+      subject: null,
+      claims: {},
+      "x-acmeco-purpose": "audit",
+    };
+    assert.equal(vdc["x-acmeco-purpose"], "audit");
   });
 });
