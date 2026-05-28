@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -196,6 +202,15 @@ describe("audit sink — close idempotency", () => {
     await sink.close();
     const elapsedMs = Number(process.hrtime.bigint() - start) / 1e6;
     assert.ok(elapsedMs < 5, `second close took ${elapsedMs}ms`);
+  });
+
+  it("surfaces async write failures via flush() instead of silently dropping", async () => {
+    const path = join(dir, "audit.jsonl");
+    const sink = createAuditSink({ path, handleSighup: false });
+    // Invalidate the descriptor behind the sink's back to force a write error.
+    closeSync(sink.fd);
+    sink.write({ seq: 1 });
+    await assert.rejects(() => sink.flush());
   });
 
   it("write after close throws", async () => {

@@ -128,8 +128,15 @@ class JsonlAuditSink implements AuditSink {
 
   async #drainAll(): Promise<void> {
     while (this.#queue.length > 0) {
-      const batch = this.#queue.splice(0).join("");
-      await writeAll(this.#fd, batch);
+      const batch = this.#queue.splice(0);
+      try {
+        await writeAll(this.#fd, batch.join(""));
+      } catch (err) {
+        // Keep unwritten records queued so a later flush()/close() can retry
+        // and so the failure is never silently dropped.
+        this.#queue = batch.concat(this.#queue);
+        throw err;
+      }
     }
   }
 
