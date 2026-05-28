@@ -82,6 +82,9 @@ class JsonlAuditSink implements AuditSink {
   #commands: Command[] = [];
   #pumping = false;
   #closed = false;
+  // Sticky fatal error. Once a write/fsync/reopen fails the sink stops writing
+  // (no retry → no duplicate records) and every barrier reports the failure.
+  #error: unknown = null;
   #closePromise: Promise<void> | null = null;
   #sighupHandler: (() => void) | null = null;
 
@@ -106,7 +109,9 @@ class JsonlAuditSink implements AuditSink {
 
     if (options.handleSighup !== false) {
       this.#sighupHandler = () => {
-        void this.reopen();
+        // A failed rotation is recorded in #error and surfaced at the next
+        // flush()/close(); catch here so it never becomes an unhandled rejection.
+        void this.reopen().catch(() => {});
       };
       process.on("SIGHUP", this.#sighupHandler);
     }
@@ -175,9 +180,7 @@ class JsonlAuditSink implements AuditSink {
     try {
       while (this.#commands.length > 0) {
         if (this.#commands[0]!.kind === "write") {
-          // On write failure, stop pumping: records stay queued for retry on
-          // the next write/flush/close, avoiding a busy-loop on a stuck disk.
-          if (!(await this.#drainWrites())) break;
+          await this.#drainWrites();
         } else {
           await this.#runBarrier(
             this.#commands.shift() as Extract<Command, { kind: "flush" }>,
@@ -189,30 +192,46 @@ class JsonlAuditSink implements AuditSink {
     }
   }
 
-  /** Coalesce the leading run of write commands into one append. Returns false on failure. */
-  async #drainWrites(): Promise<boolean> {
+  /** Coalesce the leading run of write commands into one append. */
+  async #drainWrites(): Promise<void> {
     const lines: string[] = [];
     while (this.#commands[0]?.kind === "write") {
       lines.push((this.#commands.shift() as { line: string }).line);
     }
+    if (this.#error !== null) return; // already broken: drop (reported at next barrier)
     try {
       await writeAll(this.#fd, lines.join(""));
-      return true;
     } catch (err) {
-      // Preserve unwritten records at the front of the stream so they are
-      // never silently dropped, and surface the failure to any pending
-      // flush/reopen/close so callers are not left hanging.
-      for (let i = lines.length - 1; i >= 0; i--) {
-        this.#commands.unshift({ kind: "write", line: lines[i]! });
-      }
-      this.#rejectBarriers(err);
-      return false;
+      // Fail fast: mark the sink errored and drop this batch. Not retrying
+      // avoids duplicating records that a partial write already appended.
+      this.#error = err;
     }
   }
 
   async #runBarrier(
     cmd: Extract<Command, { kind: "flush" | "reopen" | "close" }>,
   ): Promise<void> {
+    // close() must always release the fd, even after a prior fatal error.
+    if (cmd.kind === "close") {
+      try {
+        if (this.#error === null) await fsyncFd(this.#fd);
+      } catch (err) {
+        this.#error = err;
+      }
+      try {
+        await closeFd(this.#fd);
+      } catch (err) {
+        this.#error ??= err;
+      }
+      if (this.#error !== null) cmd.reject(this.#error);
+      else cmd.resolve();
+      return;
+    }
+
+    if (this.#error !== null) {
+      cmd.reject(this.#error);
+      return;
+    }
     try {
       await fsyncFd(this.#fd);
       if (cmd.kind === "reopen") {
@@ -220,22 +239,12 @@ class JsonlAuditSink implements AuditSink {
         this.#fd = openSync(this.#path, "a");
         await closeFd(previousFd);
         this.#onReopen?.({ previousFd, fd: this.#fd });
-      } else if (cmd.kind === "close") {
-        await closeFd(this.#fd);
       }
       cmd.resolve();
     } catch (err) {
+      this.#error = err;
       cmd.reject(err);
     }
-  }
-
-  /** Reject and drop every queued barrier, leaving writes queued for retry. */
-  #rejectBarriers(err: unknown): void {
-    this.#commands = this.#commands.filter((cmd) => {
-      if (cmd.kind === "write") return true;
-      cmd.reject(err);
-      return false;
-    });
   }
 }
 
