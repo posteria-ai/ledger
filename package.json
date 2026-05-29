@@ -22,7 +22,8 @@
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",
-    "test": "tsc --project tsconfig.test.json && node --test $(find .test-dist/test -name '*.test.js')"
+    "test": "tsc --project tsconfig.test.json && node --test $(find .test-dist/test -name '*.test.js')",
+    "conformance": "tsc --project tsconfig.test.json && node --test $(find .test-dist/test/conformance -name '*.conformance.js')"
   },
   "devDependencies": {
     "@types/node": "^22.15.29",

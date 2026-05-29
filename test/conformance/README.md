@@ -1,21 +1,43 @@
 # Conformance Suite
 
 This directory holds the v0.1 conformance acceptance suite for
-`@posteria/observer`. The full suite lands with task **OM003** (runtime
-implementation + v0.1.0 publish).
+`@posteria/observer`. The suite has landed.
 
-Per `specs/007-observer-mode-and-positioning/contracts/observer-api.md` §"Conformance Test Expectations",
-a conforming v0.1 implementation MUST pass tests covering:
+It is the canonical validator of the producer-side obligations in
+`docs/contract/v0.1.md` (and
+`specs/007-observer-mode-and-positioning/contracts/observer-api.md`
+§"Conformance Test Expectations"). Each contract clause maps to one named
+test, so a failing test name states the violated clause directly.
 
-- Identity-function decision behavior (every input → `allow` + recorded
-  record; no payload mutation).
-- Audit-stream record shape validation against the v0.1 contract.
-- Reserved-field enforcement (a v0.1 producer that emits any reserved
-  `posteria_*` field is non-conforming).
-- Telemetry-stub no-op verification (no network sockets opened, even with
-  `enable_anon_telemetry: true`).
-- Append-only semantics under SIGHUP / equivalent rotation events.
-- Unknown configuration key → warning, not failure.
+## Running
 
-This README is a placeholder so the directory exists in the scaffolding
-commit (OM002). The implementations land under OM003.
+```
+npm run conformance
+```
+
+Conformance files use the `.conformance.ts` suffix (not `.test.ts`), so they
+run separately from `npm test`: the unit-test glob
+(`find .test-dist/test -name '*.test.js'`) does not pick them up, and CI runs
+`npm run conformance` as a distinct step on Node 20 and 22.
+
+## Scenarios
+
+`v0.1.conformance.ts` covers the six clauses:
+
+1. **Identity-function decision behavior** — every well-formed input returns
+   `allow` + `observer_short_circuit`, with zero caller-payload mutation, and
+   exactly N records recorded.
+2. **Audit-stream record shape** — every emitted record carries the required
+   fields with pinned literals, a four-field `vdc` envelope (plus `x-*` only),
+   and no reserved field at any depth.
+3. **Producer-side reserved/unrecognized-field rejection** — each reserved
+   `posteria_*` top-level field, each reserved `vdc.*` field, any unrecognized
+   non-namespaced field (top level or `vdc`), and a malformed pseudo-namespace
+   (`x-acmeco` with no suffix) all make `observe()` throw and emit no record; a
+   valid `x-<orgslug>-*` extension is accepted (positive control).
+4. **Telemetry-stub no-op** — with `enable_anon_telemetry: true` and the real
+   stub, no network primitive is invoked.
+5. **Append-only semantics under SIGHUP** — after external rotation and a real
+   SIGHUP-driven re-open, the rotated file and the recreated path together hold
+   all records, on distinct inodes.
+6. **Unknown configuration key** — an unrecognized key warns, it does not fail.
