@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import { createAuditSink } from "./audit-sink.js";
 import { resolveConfig } from "./config.js";
+import { emitTelemetryNoop } from "./telemetry.js";
 
 export const RECORD_VERSION = "0.1.0" as const;
 export const OBSERVER_DECISION = "allow" as const;
@@ -169,10 +170,32 @@ function normalizeVdc(input: VdcInput | undefined): VdcEnvelope {
   return envelope;
 }
 
-export function createObserver(config?: Partial<ObserverConfig>): Observer {
+/**
+ * Test seam: lets the unit suite inject a telemetry spy. `@internal` + the
+ * project's `stripInternal` keep both this interface and the two-arg overload
+ * out of the published `dist/index.d.ts`, so the public signature stays
+ * `createObserver(config?)`.
+ * @internal
+ */
+interface ObserverInternals {
+  telemetry?: () => unknown;
+}
+
+export function createObserver(config?: Partial<ObserverConfig>): Observer;
+/** @internal test seam — stripped from the published types. */
+export function createObserver(
+  config: Partial<ObserverConfig> | undefined,
+  internals: ObserverInternals,
+): Observer;
+export function createObserver(
+  config?: Partial<ObserverConfig>,
+  internals?: ObserverInternals,
+): Observer {
   const resolved = resolveConfig({ programmatic: config });
   const sink = createAuditSink({ path: resolved.audit_stream_path });
   const hasHostMetadata = Object.keys(resolved.host_metadata).length > 0;
+  const telemetryEnabled = resolved.enable_anon_telemetry;
+  const telemetry = internals?.telemetry ?? emitTelemetryNoop;
 
   return {
     config: resolved,
@@ -218,6 +241,11 @@ export function createObserver(config?: Partial<ObserverConfig>): Observer {
       // and the next flush can lose the in-flight record — the documented v0.1
       // durability trade-off.
       sink.write(record);
+
+      // v0.1 no-op telemetry stub: reachable only when enable_anon_telemetry
+      // is true, so with the default-off flag this branch is provably never
+      // taken. The stub itself is a pure no-op (see ./telemetry.ts).
+      if (telemetryEnabled) telemetry();
 
       return SHORT_CIRCUIT;
     },
