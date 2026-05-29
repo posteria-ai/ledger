@@ -391,6 +391,29 @@ describe("contract: telemetry-stub no-op", () => {
       spies.push({ label, calls: () => m.mock.callCount() });
     };
 
+    // Every DNS function that issues network traffic, across the callback API,
+    // the promise API, AND both Resolver prototypes (a stub could construct its
+    // own Resolver). c-ares DNS bypasses the JS net/dgram layer, so each of
+    // these — resolve/resolve4/resolve6/resolveAny/reverse/lookup/... — must be
+    // covered independently rather than relying on the socket-level spies.
+    // (In-place spying still cannot intercept a binding a fork captured by a
+    // named `node:dns/promises` import before this test ran — an inherent limit
+    // of method spies; the socket/dgram/tls spies remain the backstop there.)
+    const isResolverFn = (name: string): boolean =>
+      name.startsWith("resolve") ||
+      name === "reverse" ||
+      name === "lookup" ||
+      name === "lookupService";
+    const spyResolverFns = (target: object, prefix: string): void => {
+      for (const name of Object.getOwnPropertyNames(target)) {
+        if (!isResolverFn(name)) continue;
+        const desc = Object.getOwnPropertyDescriptor(target, name);
+        if (desc && typeof desc.value === "function" && desc.configurable) {
+          spy(target, name, `${prefix}.${name}`);
+        }
+      }
+    };
+
     spy(net.Socket.prototype, "connect", "net.Socket#connect");
     spy(net, "createConnection");
     spy(net, "connect", "net.connect");
@@ -399,10 +422,10 @@ describe("contract: telemetry-stub no-op", () => {
     spy(https, "request", "https.request");
     spy(https, "get", "https.get");
     spy(http2, "connect", "http2.connect");
-    spy(dns, "lookup", "dns.lookup");
-    spy(dns, "resolve", "dns.resolve");
-    spy(dns.promises, "lookup", "dns.promises.lookup");
-    spy(dns.promises, "resolve", "dns.promises.resolve");
+    spyResolverFns(dns, "dns");
+    spyResolverFns(dns.promises, "dns.promises");
+    spyResolverFns(dns.Resolver.prototype, "dns.Resolver#");
+    spyResolverFns(dns.promises.Resolver.prototype, "dns.promises.Resolver#");
     spy(dgram, "createSocket", "dgram.createSocket");
     spy(tls, "connect", "tls.connect");
     if (typeof globalThis.fetch === "function") {
