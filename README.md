@@ -132,6 +132,28 @@ The full record-shape contract, including extension hooks, reserved
 namespaces, and producer/reader/validator role obligations, ships with the
 v0.1.0 release.
 
+### Reserved fields
+
+`observe()` accepts only documented v0.1 fields plus `x-<orgslug>-*`
+extensions. If runtime input contains reserved or unrecognized non-namespaced
+fields, `observe()` **throws and emits no audit record**. This applies to:
+
+- the six reserved top-level `posteria_*` fields (`posteria_attestation`,
+  `posteria_signature`, `posteria_signed_at`, `posteria_policy_digest`,
+  `posteria_linkage`, `posteria_extension_profiles`);
+- the five reserved `vdc.*` fields (`attestation`, `signature`,
+  `signature_algorithm`, `attested_at`, `verifier_id`);
+- any unrecognized non-namespaced field (e.g. `arbitrary_key`); and
+- malformed pseudo-namespaces such as `x-acmeco` with no suffix.
+
+Stripping such fields would keep the emitted record conforming, but it would
+silently hide a caller bug and lose data. The runtime guard instead surfaces
+that the caller tried to produce a non-v0.1 record. This is not policy
+blocking — Observer rejects malformed input *before* it produces an audit
+record. For valid inputs, `observe()` remains the identity function and
+returns `allow`. Well-formed `x-<orgslug>-*` extensions are passed through
+unchanged.
+
 ## Reliability & durability
 
 `observe()` returns its decision synchronously and enqueues the audit
