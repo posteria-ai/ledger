@@ -107,6 +107,17 @@ function runNetworkDenyChild(mode: string): {
   );
 }
 
+function assertDnsPromisesResolveBlocked(result: {
+  status: number | null;
+  stderr: string;
+  stdout: string;
+}): void {
+  // Assert the stable primitive label, not the preload's diagnostic sentence.
+  // This keeps negative controls from depending on stderr wording.
+  assert.equal(result.status, 1, result.stdout);
+  assert.match(result.stderr, /dns\.promises\.resolve/);
+}
+
 // RFC 3339 / ISO 8601 instant, e.g. 2026-05-28T12:34:56.789Z.
 const RFC3339 =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
@@ -405,11 +416,7 @@ describe("contract: telemetry-stub no-op", () => {
   it("network-deny subprocess catches DNS named imports captured before test module load", () => {
     const result = runNetworkDenyChild("captured-dns-negative-control");
 
-    assert.equal(result.status, 1, result.stdout);
-    assert.match(
-      result.stderr,
-      /network-deny-preload blocked dns\.promises\.resolve/,
-    );
+    assertDnsPromisesResolveBlocked(result);
   });
 
   it("network-deny subprocess fails even when a blocked DNS named import is swallowed", () => {
@@ -417,8 +424,7 @@ describe("contract: telemetry-stub no-op", () => {
       "swallowed-captured-dns-negative-control",
     );
 
-    assert.equal(result.status, 1, result.stdout);
-    assert.match(result.stderr, /dns\.promises\.resolve/);
+    assertDnsPromisesResolveBlocked(result);
   });
 
   it("opens no socket and issues no DNS/HTTP/HTTPS/HTTP2/UDP/TLS/fetch traffic with the real stub even when enable_anon_telemetry is true", async () => {
