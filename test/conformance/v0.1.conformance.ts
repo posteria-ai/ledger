@@ -99,6 +99,10 @@ function runNetworkDenyChild(mode: string): {
     compiledDir,
     "../../../test/conformance/network-deny-preload.cjs",
   );
+  assert.ok(
+    existsSync(preloadPath),
+    `network-deny preload not found at ${preloadPath}`,
+  );
 
   return spawnSync(
     process.execPath,
@@ -114,8 +118,12 @@ function assertDnsPromisesResolveBlocked(result: {
 }): void {
   // Assert the stable primitive label, not the preload's diagnostic sentence.
   // This keeps negative controls from depending on stderr wording.
-  assert.equal(result.status, 1, result.stdout);
-  assert.match(result.stderr, /dns\.promises\.resolve/);
+  assert.equal(
+    result.status,
+    1,
+    `network-deny negative control did not fail as expected\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
+  );
+  assert.match(result.stderr, /\bdns\.promises\.resolve\b/);
 }
 
 // RFC 3339 / ISO 8601 instant, e.g. 2026-05-28T12:34:56.789Z.
