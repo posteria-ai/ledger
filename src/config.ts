@@ -43,7 +43,13 @@ export interface ConfigSources {
   programmatic?: Partial<ObserverConfig> & Record<string, unknown>;
   /** Environment bag; defaults to `process.env`. */
   env?: Record<string, string | undefined>;
-  /** CLI argument vector (already sliced past node + script); defaults to `process.argv.slice(2)`. */
+  /**
+   * CLI argument vector (already sliced past node + script). Has no default:
+   * CLI flags are scoped to CLI use, so a CLI wrapper must pass `process.argv`
+   * in explicitly. Library construction does NOT read the host process's argv,
+   * which would otherwise let an unrelated host app's flags silently override
+   * programmatic options.
+   */
   argv?: string[];
   /** Warning sink; defaults to writing a line to stderr. */
   warn?: (message: string) => void;
@@ -55,6 +61,17 @@ function freshDefaults(): ObserverConfig {
     enable_anon_telemetry: false,
     host_metadata: {},
   };
+}
+
+/** Recursively freeze so nested config values (e.g. host_metadata) are read-only too. */
+function deepFreeze<T>(value: T): T {
+  if (value !== null && typeof value === "object") {
+    for (const key of Object.keys(value as object)) {
+      deepFreeze((value as Record<string, unknown>)[key]);
+    }
+    Object.freeze(value);
+  }
+  return value;
 }
 
 function parseBoolean(
@@ -176,7 +193,8 @@ function applyCli(
 /**
  * Resolve effective configuration from the three contract sources with
  * later-wins precedence: programmatic options < POSTERIA_OBSERVER_* env <
- * CLI flags. Unknown keys warn but never abort. The returned object is frozen.
+ * CLI flags. Unknown keys warn but never abort. The returned object is
+ * deeply frozen — nested object values (host_metadata) are read-only too.
  */
 export function resolveConfig(
   sources: ConfigSources = {},
@@ -184,7 +202,7 @@ export function resolveConfig(
   const warn =
     sources.warn ?? ((message: string) => process.stderr.write(`${message}\n`));
   const env = sources.env ?? process.env;
-  const argv = sources.argv ?? process.argv.slice(2);
+  const argv = sources.argv ?? [];
   const programmatic = sources.programmatic ?? {};
 
   const config = freshDefaults();
@@ -192,5 +210,8 @@ export function resolveConfig(
   applyEnv(config, env, warn);
   applyCli(config, argv, warn);
 
-  return Object.freeze(config);
+  // Clone before freezing so we expose a read-only copy without freezing a
+  // caller-supplied host_metadata object out from under them.
+  config.host_metadata = structuredClone(config.host_metadata);
+  return deepFreeze(config);
 }

@@ -173,4 +173,48 @@ describe("resolveConfig — read-only result", () => {
     });
     assert.equal(config.audit_stream_path, DEFAULT_AUDIT_STREAM_PATH);
   });
+
+  it("throws on mutation of a nested host_metadata value", () => {
+    const config = resolveConfig({
+      programmatic: { host_metadata: { region: "us-east-1" } },
+      env: {},
+      argv: [],
+      warn: silent,
+    });
+    assert.throws(() => {
+      (config.host_metadata as { region: string }).region = "eu";
+    });
+    assert.deepEqual(config.host_metadata, { region: "us-east-1" });
+  });
+
+  it("does not freeze the caller-supplied host_metadata object", () => {
+    const meta: Record<string, unknown> = { region: "us-east-1" };
+    resolveConfig({
+      programmatic: { host_metadata: meta },
+      env: {},
+      argv: [],
+      warn: silent,
+    });
+    // The caller still owns their object; only the exposed config copy is frozen.
+    assert.doesNotThrow(() => {
+      meta.region = "eu";
+    });
+  });
+});
+
+describe("resolveConfig — argv is not read from the host process", () => {
+  it("ignores process.argv when no argv source is supplied", () => {
+    const saved = process.argv;
+    process.argv = ["node", "host-app", "--audit-stream-path=/tmp/leaked"];
+    try {
+      const config = resolveConfig({
+        programmatic: { audit_stream_path: "/safe/audit.jsonl" },
+        env: {},
+        warn: silent,
+      });
+      assert.equal(config.audit_stream_path, "/safe/audit.jsonl");
+    } finally {
+      process.argv = saved;
+    }
+  });
 });
