@@ -132,6 +132,27 @@ The full record-shape contract, including extension hooks, reserved
 namespaces, and producer/reader/validator role obligations, ships with the
 v0.1.0 release.
 
+## Reliability & durability
+
+`observe()` returns its decision synchronously and enqueues the audit
+record for writing **fire-and-forget** — file I/O never sits on the hot path
+of an observed call. The sink serializes queued records into an append-only
+NDJSON stream and flushes them on its own cadence: writes are pumped on the
+next microtask tick and consecutive queued records coalesce into a single
+append, so a burst of `observe()` calls drains in as few syscalls as possible.
+
+**Durability trade-off (v0.1, accepted):** because writes are fire-and-forget,
+a hard process crash *between* an `observe()` call and the next flush can lose
+the in-flight record. `close()` is the deterministic drain primitive — it
+flushes the queue and `fsync`s the file, resolving only once every queued
+record is durably on disk. Call `close()` on graceful shutdown. Operators who
+need stronger per-call durability can wrap `observe()` + `close()` themselves;
+this is the documented v0.1 trade-off, not a defect.
+
+`close()` is idempotent: a second call is safe and resolves promptly. The sink
+also re-opens its file descriptor on `SIGHUP`, so external log-rotation tooling
+can rotate the audit stream without losing or misdirecting records.
+
 ## Contributing
 
 See `CONTRIBUTING.md`.
