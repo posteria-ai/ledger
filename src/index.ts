@@ -81,6 +81,41 @@ const SHORT_CIRCUIT: ObserverDecision = Object.freeze({
 // `posteria_*` and any non-namespaced field — neither matches.
 const EXTENSION_KEY = /^x-[^-]+-.+/;
 
+const ALLOWED_ACTION_KEYS: ReadonlySet<string> = new Set([
+  "action_kind",
+  "action_signature",
+  "vdc",
+]);
+
+const ALLOWED_VDC_KEYS: ReadonlySet<string> = new Set([
+  "mandate_id",
+  "issuer",
+  "subject",
+  "claims",
+]);
+
+/**
+ * Reject runtime input that would force Observer to emit a non-v0.1 record.
+ * observe() accepts only documented v0.1 fields plus `x-<orgslug>-*`
+ * extensions; any reserved `posteria_*` field, reserved `vdc.*` field,
+ * unrecognized non-namespaced field, or malformed pseudo-namespace (e.g.
+ * `x-acmeco` with no suffix) throws before any audit record is enqueued. This
+ * enforces Observer's producer obligation by rejecting malformed input — it is
+ * not policy evaluation, and valid inputs remain the identity function.
+ */
+function assertOnlyDocumentedFields(
+  source: Record<string, unknown>,
+  allowed: ReadonlySet<string>,
+  location: "action" | "vdc",
+): void {
+  for (const key of Object.keys(source)) {
+    if (allowed.has(key) || EXTENSION_KEY.test(key)) continue;
+    throw new Error(
+      `[posteria-observer] observe() rejected non-v0.1 field ${JSON.stringify(key)} on ${location}: only documented v0.1 fields and x-<orgslug>-* extensions are accepted; no audit record was emitted`,
+    );
+  }
+}
+
 /** Reference-preserving copy of caller-supplied `x-<orgslug>-*` extension keys onto `target`. */
 function copyExtensions(
   source: Record<string, unknown>,
@@ -143,6 +178,22 @@ export function createObserver(config?: Partial<ObserverConfig>): Observer {
     config: resolved,
 
     observe(action: AuditAction): ObserverDecision {
+      // Guard before building or enqueueing anything: a caller that supplies a
+      // reserved or unrecognized field is trying to produce a non-v0.1 record,
+      // so reject the call rather than silently dropping their data.
+      assertOnlyDocumentedFields(
+        action as unknown as Record<string, unknown>,
+        ALLOWED_ACTION_KEYS,
+        "action",
+      );
+      if (action.vdc) {
+        assertOnlyDocumentedFields(
+          action.vdc as Record<string, unknown>,
+          ALLOWED_VDC_KEYS,
+          "vdc",
+        );
+      }
+
       const record: AuditRecord = {
         record_version: RECORD_VERSION,
         record_id: randomUUID(),

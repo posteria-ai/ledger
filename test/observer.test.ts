@@ -145,20 +145,147 @@ describe("namespaced extension pass-through", () => {
     });
   });
 
-  it("does not emit reserved or non-namespaced extra fields", async () => {
+});
+
+describe("reserved / unrecognized field guard", () => {
+  const RESERVED_TOP_LEVEL = [
+    "posteria_attestation",
+    "posteria_signature",
+    "posteria_signed_at",
+    "posteria_policy_digest",
+    "posteria_linkage",
+    "posteria_extension_profiles",
+  ];
+  const RESERVED_VDC = [
+    "attestation",
+    "signature",
+    "signature_algorithm",
+    "attested_at",
+    "verifier_id",
+  ];
+
+  function recordCount(path: string): number {
+    try {
+      return readRecords(path).length;
+    } catch {
+      return 0;
+    }
+  }
+
+  for (const field of RESERVED_TOP_LEVEL) {
+    it(`throws and emits no record for reserved top-level field ${field}`, async () => {
+      const { observer, path } = newObserver();
+      assert.throws(
+        () => observer.observe({ ...action(), [field]: {} } as AuditAction),
+        /non-v0.1 field/,
+      );
+      await observer.close();
+      assert.equal(recordCount(path), 0);
+    });
+  }
+
+  for (const field of RESERVED_VDC) {
+    it(`throws and emits no record for reserved vdc field ${field}`, async () => {
+      const { observer, path } = newObserver();
+      assert.throws(
+        () =>
+          observer.observe(
+            action({ vdc: { mandate_id: "m", [field]: {} } } as Partial<AuditAction>),
+          ),
+        /non-v0.1 field/,
+      );
+      await observer.close();
+      assert.equal(recordCount(path), 0);
+    });
+  }
+
+  it("throws for an unrecognized non-namespaced top-level field", async () => {
     const { observer, path } = newObserver();
-    const input = {
-      ...action(),
-      posteria_internal: "reserved",
-      arbitrary_field: "nope",
-      "x-acmeco": "missing-suffix",
-    } as AuditAction;
-    observer.observe(input);
+    assert.throws(
+      () => observer.observe({ ...action(), arbitrary_key: "nope" } as AuditAction),
+      /non-v0.1 field/,
+    );
+    await observer.close();
+    assert.equal(recordCount(path), 0);
+  });
+
+  it("throws for a malformed pseudo-namespace (x-acmeco with no suffix)", async () => {
+    const { observer, path } = newObserver();
+    assert.throws(
+      () => observer.observe({ ...action(), "x-acmeco": "no-suffix" } as AuditAction),
+      /non-v0.1 field/,
+    );
+    await observer.close();
+    assert.equal(recordCount(path), 0);
+  });
+
+  it("throws for an unrecognized non-namespaced field inside vdc", async () => {
+    const { observer, path } = newObserver();
+    assert.throws(
+      () =>
+        observer.observe(
+          action({ vdc: { mandate_id: "m", arbitrary_key: "nope" } } as Partial<AuditAction>),
+        ),
+      /non-v0.1 field/,
+    );
+    await observer.close();
+    assert.equal(recordCount(path), 0);
+  });
+
+  it("accepts valid x-<orgslug>-* extensions at top level and in vdc (positive control)", async () => {
+    const { observer, path } = newObserver();
+    observer.observe(
+      action({
+        "x-acmeco-trace_id": "abc",
+        vdc: { mandate_id: "m", "x-acmeco-purpose": "audit" },
+      }),
+    );
     await observer.close();
     const [rec] = readRecords(path);
-    assert.equal("posteria_internal" in rec!, false);
-    assert.equal("arbitrary_field" in rec!, false);
-    assert.equal("x-acmeco" in rec!, false);
+    assert.equal(rec!["x-acmeco-trace_id"], "abc");
+    assert.equal((rec!.vdc as Record<string, unknown>)["x-acmeco-purpose"], "audit");
+  });
+
+  it("conformance: no reserved key appears at any depth across N>1000 emitted records", async () => {
+    const reserved = new Set([...RESERVED_TOP_LEVEL, ...RESERVED_VDC]);
+
+    function collectKeys(value: unknown, into: Set<string>): void {
+      if (Array.isArray(value)) {
+        for (const item of value) collectKeys(item, into);
+      } else if (value !== null && typeof value === "object") {
+        for (const [key, child] of Object.entries(value)) {
+          into.add(key);
+          collectKeys(child, into);
+        }
+      }
+    }
+
+    const { observer, path } = newObserver();
+    const n = 1024;
+    for (let i = 0; i < n; i++) {
+      observer.observe(
+        action({
+          action_signature: `search(q${i})`,
+          "x-acmeco-trace_id": `t-${i}`,
+          vdc: {
+            mandate_id: `m-${i}`,
+            issuer: "iss",
+            subject: "sub",
+            claims: { role: "admin", attempt: i },
+            "x-acmeco-purpose": "audit",
+          },
+        }),
+      );
+    }
+    await observer.close();
+
+    const records = readRecords(path);
+    assert.equal(records.length, n);
+    const keys = new Set<string>();
+    for (const rec of records) collectKeys(rec, keys);
+    for (const name of reserved) {
+      assert.equal(keys.has(name), false, `reserved key ${name} leaked into emitted records`);
+    }
   });
 });
 
