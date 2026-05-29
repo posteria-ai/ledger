@@ -35,6 +35,9 @@ const blockResolverFns = (target, prefix) => {
   }
 };
 
+// Keep this network-primitive inventory in sync with the in-process spy list
+// in v0.1.conformance.ts. This preload must stay CommonJS so `--require` can
+// install it before any ESM module captures built-in bindings.
 block(net.Socket.prototype, "connect", "net.Socket#connect");
 block(net, "createConnection", "net.createConnection");
 block(net, "connect", "net.connect");

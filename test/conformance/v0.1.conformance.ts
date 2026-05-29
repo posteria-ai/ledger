@@ -93,9 +93,11 @@ function runNetworkDenyChild(mode: string): {
 } {
   const compiledDir = dirname(fileURLToPath(import.meta.url));
   const childPath = join(compiledDir, "telemetry-network-deny-child.js");
+  // The preload stays as source .cjs so Node can load it before compiled ESM.
+  // Resolve it from this compiled conformance file, not the caller's cwd.
   const preloadPath = join(
-    process.cwd(),
-    "test/conformance/network-deny-preload.cjs",
+    compiledDir,
+    "../../../test/conformance/network-deny-preload.cjs",
   );
 
   return spawnSync(
@@ -403,7 +405,7 @@ describe("contract: telemetry-stub no-op", () => {
   it("network-deny subprocess catches DNS named imports captured before test module load", () => {
     const result = runNetworkDenyChild("captured-dns-negative-control");
 
-    assert.notEqual(result.status, 0, result.stdout);
+    assert.equal(result.status, 1, result.stdout);
     assert.match(
       result.stderr,
       /network-deny-preload blocked dns\.promises\.resolve/,
@@ -469,6 +471,10 @@ describe("contract: telemetry-stub no-op", () => {
       }
     };
 
+    // Keep this network-primitive inventory in sync with
+    // network-deny-preload.cjs. The duplication is intentional: the preload
+    // catches bindings captured before this test module loads, while this
+    // in-process spy preserves call-count assertions for the live object path.
     spy(net.Socket.prototype, "connect", "net.Socket#connect");
     spy(net, "createConnection");
     spy(net, "connect", "net.connect");
