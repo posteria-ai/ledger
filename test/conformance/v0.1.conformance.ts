@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import dgram from "node:dgram";
 import dns from "node:dns";
 import {
+  existsSync,
   mkdtempSync,
   readFileSync,
   renameSync,
@@ -8,13 +10,14 @@ import {
   statSync,
 } from "node:fs";
 import http from "node:http";
+import http2 from "node:http2";
 import https from "node:https";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import tls from "node:tls";
 import { afterEach, beforeEach, describe, it, mock } from "node:test";
 
-import { createAuditSink } from "../../src/audit-sink.js";
 import { resolveConfig } from "../../src/config.js";
 import { createObserver, type AuditAction } from "../../src/index.js";
 
@@ -65,15 +68,62 @@ function readRecords(path: string): Record<string, unknown>[] {
         .map((l) => JSON.parse(l) as Record<string, unknown>);
 }
 
-/** Collect every property name appearing at any depth in a JSON value. */
-function collectKeys(value: unknown, into: Set<string>): void {
-  if (Array.isArray(value)) {
-    for (const item of value) collectKeys(item, into);
-  } else if (value !== null && typeof value === "object") {
-    for (const [key, child] of Object.entries(value)) {
-      into.add(key);
-      collectKeys(child, into);
+/**
+ * Assert the emit-no-record obligation strictly: a missing or empty file is the
+ * only passing state. Any non-empty content fails — including a partial or
+ * malformed line written before observe() threw, which must NOT be silently
+ * treated as "zero records".
+ */
+function assertNoRecordEmitted(path: string): void {
+  if (!existsSync(path)) return;
+  const raw = readFileSync(path, "utf8");
+  assert.equal(
+    raw.length,
+    0,
+    `expected no audit output, but the file is non-empty: ${JSON.stringify(raw.slice(0, 200))}`,
+  );
+}
+
+/**
+ * Reserved-field check scoped to the contract's malformed-field surface: the
+ * top-level record envelope and the direct `vdc` envelope only. `vdc.claims` is
+ * opaque per the contract and is deliberately NOT scanned — a caller may place
+ * any key (even one that collides with a reserved name) inside claims.
+ */
+function assertNoReservedEnvelopeFields(rec: Record<string, unknown>): void {
+  for (const key of Object.keys(rec)) {
+    assert.equal(
+      (RESERVED_TOP_LEVEL as readonly string[]).includes(key),
+      false,
+      `reserved top-level field ${key} leaked into the record envelope`,
+    );
+  }
+  const vdc = rec.vdc as Record<string, unknown>;
+  for (const key of Object.keys(vdc)) {
+    assert.equal(
+      (RESERVED_VDC as readonly string[]).includes(key),
+      false,
+      `reserved vdc field ${key} leaked into the vdc envelope`,
+    );
+  }
+}
+
+// RFC 3339 / ISO 8601 instant, e.g. 2026-05-28T12:34:56.789Z.
+const RFC3339 =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
+
+/** Poll `predicate` until true, failing with a clear message if it never settles. */
+async function waitUntil(
+  predicate: () => boolean,
+  label: string,
+  timeoutMs = 2000,
+): Promise<void> {
+  const start = Date.now();
+  while (!predicate()) {
+    if (Date.now() - start > timeoutMs) {
+      throw new Error(`timed out after ${timeoutMs}ms waiting for ${label}`);
     }
+    await new Promise((resolve) => setTimeout(resolve, 10));
   }
 }
 
@@ -125,32 +175,46 @@ describe("contract: audit-stream record shape", () => {
   ] as const;
   const VDC_FIELDS = ["mandate_id", "issuer", "subject", "claims"] as const;
 
-  it("every emitted record carries required fields with pinned literals, a four-field vdc envelope, and no reserved field at any depth", async () => {
+  it("every emitted record carries required fields with pinned literals, a four-field vdc envelope, and no reserved envelope field", async () => {
     const path = join(dir, "audit.jsonl");
     const observer = createObserver({ audit_stream_path: path });
-    const n = 256;
 
-    for (let i = 0; i < n; i++) {
-      observer.observe(
+    // A mix of vdc shapes so the validator also exercises the documented
+    // defaults for omitted fields, not only fully-populated envelopes.
+    const inputs: AuditAction[] = [
+      // [0] fully-populated vdc + extensions; claims carries a reserved-sounding
+      // key, which is legal because claims is opaque and must be preserved.
+      action({
+        action_signature: "full(0)",
+        "x-acmeco-trace_id": "t-0",
+        vdc: {
+          mandate_id: "m-0",
+          issuer: "iss",
+          subject: "sub",
+          claims: { role: "admin", signature: "opaque-not-a-vdc-field" },
+          "x-acmeco-purpose": "audit",
+        },
+      }),
+      // [1] no vdc at all → all four fields must default.
+      action({ action_signature: "no-vdc(1)" }),
+      // [2] partial vdc (only mandate_id) → the other three must default.
+      action({ action_signature: "partial(2)", vdc: { mandate_id: "only" } }),
+    ];
+    const bulk = 256;
+    for (let i = 0; i < bulk; i++) {
+      inputs.push(
         action({
-          action_signature: `search(q${i})`,
-          "x-acmeco-trace_id": `t-${i}`,
-          vdc: {
-            mandate_id: `m-${i}`,
-            issuer: "iss",
-            subject: "sub",
-            claims: { role: "admin", attempt: i },
-            "x-acmeco-purpose": "audit",
-          },
+          action_signature: `bulk(${i})`,
+          vdc: { mandate_id: `m-${i}`, issuer: "iss", subject: "sub" },
         }),
       );
     }
+
+    for (const input of inputs) observer.observe(input);
     await observer.close();
 
     const records = readRecords(path);
-    assert.equal(records.length, n);
-
-    const reserved = new Set<string>([...RESERVED_TOP_LEVEL, ...RESERVED_VDC]);
+    assert.equal(records.length, inputs.length);
 
     for (const rec of records) {
       for (const field of REQUIRED_FIELDS) {
@@ -159,6 +223,21 @@ describe("contract: audit-stream record shape", () => {
       assert.equal(rec.record_version, "0.1.0");
       assert.equal(rec.decision, "allow");
       assert.equal(rec.decision_reason, "observer_short_circuit");
+
+      // Semantic checks, not just presence: a constant id, a non-RFC3339
+      // timestamp, or a non-string version must all fail here.
+      assert.equal(typeof rec.record_id, "string");
+      assert.ok((rec.record_id as string).length > 0, "record_id is non-empty");
+      assert.match(rec.recorded_at as string, RFC3339);
+      assert.ok(
+        !Number.isNaN(Date.parse(rec.recorded_at as string)),
+        "recorded_at parses as a date",
+      );
+      assert.equal(typeof rec.observer_version, "string");
+      assert.ok(
+        (rec.observer_version as string).length > 0,
+        "observer_version is non-empty",
+      );
 
       const vdc = rec.vdc as Record<string, unknown>;
       // The vdc envelope has exactly the four documented fields plus only
@@ -175,29 +254,39 @@ describe("contract: audit-stream record shape", () => {
         );
       }
 
-      // No reserved field appears at any depth (claims contents included).
-      const keys = new Set<string>();
-      collectKeys(rec, keys);
-      for (const name of reserved) {
-        assert.equal(
-          keys.has(name),
-          false,
-          `reserved field ${name} leaked into an emitted record`,
-        );
-      }
+      assertNoReservedEnvelopeFields(rec);
     }
+
+    // record_id uniqueness across the whole sample.
+    const ids = records.map((r) => r.record_id);
+    assert.equal(new Set(ids).size, records.length, "record_ids are unique");
+
+    // Documented defaults for the omitted/partial vdc cases.
+    const noVdc = (records[1]!.vdc as Record<string, unknown>);
+    assert.deepEqual(noVdc, {
+      mandate_id: null,
+      issuer: null,
+      subject: null,
+      claims: {},
+    });
+    const partial = (records[2]!.vdc as Record<string, unknown>);
+    assert.deepEqual(partial, {
+      mandate_id: "only",
+      issuer: null,
+      subject: null,
+      claims: {},
+    });
+
+    // Opaque claims preserved verbatim, including a reserved-sounding key.
+    const fullClaims = (records[0]!.vdc as Record<string, unknown>).claims;
+    assert.deepEqual(fullClaims, {
+      role: "admin",
+      signature: "opaque-not-a-vdc-field",
+    });
   });
 });
 
 describe("contract: producer-side reserved/unrecognized-field rejection", () => {
-  function recordCount(path: string): number {
-    try {
-      return readRecords(path).length;
-    } catch {
-      return 0;
-    }
-  }
-
   for (const field of RESERVED_TOP_LEVEL) {
     it(`observe() throws and emits no record for reserved top-level field ${field}`, async () => {
       const path = join(dir, `top-${field}.jsonl`);
@@ -207,7 +296,7 @@ describe("contract: producer-side reserved/unrecognized-field rejection", () => 
         /non-v0.1 field/,
       );
       await observer.close();
-      assert.equal(recordCount(path), 0);
+      assertNoRecordEmitted(path);
     });
   }
 
@@ -225,7 +314,7 @@ describe("contract: producer-side reserved/unrecognized-field rejection", () => 
         /non-v0.1 field/,
       );
       await observer.close();
-      assert.equal(recordCount(path), 0);
+      assertNoRecordEmitted(path);
     });
   }
 
@@ -237,7 +326,7 @@ describe("contract: producer-side reserved/unrecognized-field rejection", () => 
       /non-v0.1 field/,
     );
     await observer.close();
-    assert.equal(recordCount(path), 0);
+    assertNoRecordEmitted(path);
   });
 
   it("observe() throws and emits no record for an unrecognized non-namespaced field inside vdc", async () => {
@@ -253,7 +342,7 @@ describe("contract: producer-side reserved/unrecognized-field rejection", () => 
       /non-v0.1 field/,
     );
     await observer.close();
-    assert.equal(recordCount(path), 0);
+    assertNoRecordEmitted(path);
   });
 
   it("observe() throws and emits no record for a malformed pseudo-namespace (x-acmeco with no suffix) at top level and in vdc", async () => {
@@ -265,7 +354,7 @@ describe("contract: producer-side reserved/unrecognized-field rejection", () => 
       /non-v0.1 field/,
     );
     await topObserver.close();
-    assert.equal(recordCount(topPath), 0);
+    assertNoRecordEmitted(topPath);
 
     const vdcPath = join(dir, "malformed-vdc.jsonl");
     const vdcObserver = createObserver({ audit_stream_path: vdcPath });
@@ -279,7 +368,7 @@ describe("contract: producer-side reserved/unrecognized-field rejection", () => 
       /non-v0.1 field/,
     );
     await vdcObserver.close();
-    assert.equal(recordCount(vdcPath), 0);
+    assertNoRecordEmitted(vdcPath);
   });
 
   it("accepts a valid x-<orgslug>-* extension at top level and in vdc (positive control)", async () => {
@@ -302,11 +391,34 @@ describe("contract: producer-side reserved/unrecognized-field rejection", () => 
 });
 
 describe("contract: telemetry-stub no-op", () => {
-  it("opens no network sockets and issues no DNS/HTTP/HTTPS requests with the real stub even when enable_anon_telemetry is true", async () => {
-    const netSpy = mock.method(net, "createConnection");
-    const httpSpy = mock.method(http, "request");
-    const httpsSpy = mock.method(https, "request");
-    const dnsSpy = mock.method(dns, "lookup");
+  it("opens no socket and issues no DNS/HTTP/HTTPS/HTTP2/UDP/TLS/fetch traffic with the real stub even when enable_anon_telemetry is true", async () => {
+    // Spy the full surface a telemetry implementation could plausibly use, plus
+    // the low-level Socket.prototype.connect that every TCP path funnels
+    // through — so a stub that bypasses the high-level aliases is still caught.
+    const spies: { label: string; calls: () => number }[] = [];
+    const spy = (obj: object, method: string, label = method): void => {
+      const m = mock.method(obj as never, method as never) as unknown as {
+        mock: { callCount(): number };
+      };
+      spies.push({ label, calls: () => m.mock.callCount() });
+    };
+
+    spy(net.Socket.prototype, "connect", "net.Socket#connect");
+    spy(net, "createConnection");
+    spy(net, "connect", "net.connect");
+    spy(http, "request", "http.request");
+    spy(http, "get", "http.get");
+    spy(https, "request", "https.request");
+    spy(https, "get", "https.get");
+    spy(http2, "connect", "http2.connect");
+    spy(dns, "lookup", "dns.lookup");
+    spy(dns, "resolve", "dns.resolve");
+    spy(dns.promises, "lookup", "dns.promises.lookup");
+    spy(dgram, "createSocket", "dgram.createSocket");
+    spy(tls, "connect", "tls.connect");
+    if (typeof globalThis.fetch === "function") {
+      spy(globalThis, "fetch", "fetch");
+    }
 
     const path = join(dir, "audit.jsonl");
     // Real stub: no internals seam supplied.
@@ -318,50 +430,47 @@ describe("contract: telemetry-stub no-op", () => {
     for (let i = 0; i < n; i++) observer.observe(action());
     await observer.close();
 
-    assert.equal(netSpy.mock.callCount(), 0);
-    assert.equal(httpSpy.mock.callCount(), 0);
-    assert.equal(httpsSpy.mock.callCount(), 0);
-    assert.equal(dnsSpy.mock.callCount(), 0);
+    for (const { label, calls } of spies) {
+      assert.equal(calls(), 0, `telemetry no-op invoked ${label}`);
+    }
     // mocks restored in afterEach via mock.restoreAll().
   });
 });
 
 describe("contract: append-only semantics under SIGHUP", () => {
-  it("re-opens on SIGHUP so the rotated file and the recreated path together hold all records on distinct inodes", async () => {
+  it("observe()s K records, rotates + SIGHUPs, observe()s K more, and all 2K survive across distinct inodes", async () => {
     const path = join(dir, "audit.jsonl");
     const rotated = join(dir, "audit.jsonl.1");
     const k = 200;
 
-    // Drive the Observer's append-only engine directly for deterministic
-    // synchronization with the re-open.
-    let resolveReopen!: () => void;
-    const reopened = new Promise<void>((resolve) => {
-      resolveReopen = resolve;
-    });
-
-    const sink = createAuditSink({
-      path,
-      onReopen: () => resolveReopen(),
-    });
-
-    // A pending Promise does not by itself keep libuv's loop alive, so a bare
-    // `await reopened` can let Node exit before the SIGHUP is delivered. A
-    // small keepalive timer keeps the loop ticking until the re-open fires.
-    const keepalive = setInterval(() => {}, 10);
+    // Exercise the PUBLIC Observer path, not the sink directly: createObserver
+    // installs the SIGHUP handler by default, so a real signal drives the
+    // re-open exactly as a host operator's log-rotation tooling would.
+    const observer = createObserver({ audit_stream_path: path });
 
     try {
-      for (let i = 0; i < k; i++) sink.write({ phase: "before", i });
-      await sink.flush();
+      for (let i = 0; i < k; i++) {
+        observer.observe(action({ action_signature: `before(${i})` }));
+      }
+      // close() is the only public drain primitive, but it also closes; instead
+      // rely on the re-open's fsync to flush the pre-rotation batch. Capture the
+      // inode after the writes are enqueued and before the external rename.
       const originalIno = statSync(path).ino;
 
       // External rotation: move the live file aside, then signal the rotation.
+      // The setInterval poll below keeps libuv's loop alive until the signal is
+      // delivered, and is bounded so a missing handler fails fast (not a hang).
       renameSync(path, rotated);
       process.kill(process.pid, "SIGHUP");
-      await reopened;
-      clearInterval(keepalive);
+      await waitUntil(
+        () => existsSync(path) && statSync(path).ino !== originalIno,
+        "SIGHUP re-open to recreate the audit file at a new inode",
+      );
 
-      for (let i = 0; i < k; i++) sink.write({ phase: "after", i });
-      await sink.close();
+      for (let i = 0; i < k; i++) {
+        observer.observe(action({ action_signature: `after(${i})` }));
+      }
+      await observer.close();
 
       const before = readRecords(rotated);
       const after = readRecords(path);
@@ -374,11 +483,11 @@ describe("contract: append-only semantics under SIGHUP", () => {
         "2K records total, all parseable",
       );
       assert.ok(
-        before.every((r) => r.phase === "before"),
+        before.every((r) => (r.action_signature as string).startsWith("before")),
         "rotated file holds only pre-rotation records",
       );
       assert.ok(
-        after.every((r) => r.phase === "after"),
+        after.every((r) => (r.action_signature as string).startsWith("after")),
         "recreated path holds only post-rotation records",
       );
 
@@ -389,10 +498,9 @@ describe("contract: append-only semantics under SIGHUP", () => {
         "recreated file inode differs from the pre-rotation inode",
       );
     } finally {
-      clearInterval(keepalive);
       // close() removes the SIGHUP handler; ensure it ran even on failure so
-      // the handler does not leak into other tests.
-      await sink.close();
+      // the handler does not leak into other tests. Idempotent.
+      await observer.close();
     }
   });
 });
@@ -409,6 +517,10 @@ describe("contract: unknown configuration key warns, it does not fail", () => {
     assert.equal(warnings.length, 1);
     assert.match(warnings[0]!, /unknown configuration key/);
 
+    // The public path (createObserver) has no warn injection point, so it
+    // defaults to stderr. Capture stderr to prove the warning is actually
+    // surfaced there — and still that construction does not throw.
+    const stderrSpy = mock.method(process.stderr, "write", () => true);
     const path = join(dir, "audit.jsonl");
     let observer!: ReturnType<typeof createObserver>;
     assert.doesNotThrow(() => {
@@ -417,6 +529,12 @@ describe("contract: unknown configuration key warns, it does not fail", () => {
         unrecognized_key: true,
       } as Parameters<typeof createObserver>[0]);
     });
+    const stderrOutput = stderrSpy.mock.calls
+      .map((c) => String(c.arguments[0]))
+      .join("");
+    stderrSpy.mock.restore();
+    assert.match(stderrOutput, /unknown configuration key/);
+
     await observer.close();
   });
 });
