@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import dgram from "node:dgram";
 import dns from "node:dns";
 import {
@@ -14,7 +15,8 @@ import http2 from "node:http2";
 import https from "node:https";
 import net from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import tls from "node:tls";
 import { afterEach, beforeEach, describe, it, mock } from "node:test";
 
@@ -81,6 +83,25 @@ function assertNoRecordEmitted(path: string): void {
     raw.length,
     0,
     `expected no audit output, but the file is non-empty: ${JSON.stringify(raw.slice(0, 200))}`,
+  );
+}
+
+function runNetworkDenyChild(mode: string): {
+  status: number | null;
+  stderr: string;
+  stdout: string;
+} {
+  const compiledDir = dirname(fileURLToPath(import.meta.url));
+  const childPath = join(compiledDir, "telemetry-network-deny-child.js");
+  const preloadPath = join(
+    process.cwd(),
+    "test/conformance/network-deny-preload.cjs",
+  );
+
+  return spawnSync(
+    process.execPath,
+    ["--require", preloadPath, childPath, mode],
+    { encoding: "utf8" },
   );
 }
 
@@ -379,7 +400,34 @@ describe("contract: producer-side reserved/unrecognized-field rejection", () => 
 });
 
 describe("contract: telemetry-stub no-op", () => {
+  it("network-deny subprocess catches DNS named imports captured before test module load", () => {
+    const result = runNetworkDenyChild("captured-dns-negative-control");
+
+    assert.notEqual(result.status, 0, result.stdout);
+    assert.match(
+      result.stderr,
+      /network-deny-preload blocked dns\.promises\.resolve/,
+    );
+  });
+
+  it("network-deny subprocess fails even when a blocked DNS named import is swallowed", () => {
+    const result = runNetworkDenyChild(
+      "swallowed-captured-dns-negative-control",
+    );
+
+    assert.equal(result.status, 1, result.stdout);
+    assert.match(result.stderr, /dns\.promises\.resolve/);
+  });
+
   it("opens no socket and issues no DNS/HTTP/HTTPS/HTTP2/UDP/TLS/fetch traffic with the real stub even when enable_anon_telemetry is true", async () => {
+    const result = runNetworkDenyChild("real-telemetry-noop");
+
+    assert.equal(
+      result.status,
+      0,
+      `telemetry no-op subprocess failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
+    );
+
     // Spy the full surface a telemetry implementation could plausibly use, plus
     // the low-level Socket.prototype.connect that every TCP path funnels
     // through — so a stub that bypasses the high-level aliases is still caught.

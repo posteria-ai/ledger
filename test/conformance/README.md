@@ -36,7 +36,8 @@ run separately from `npm test`: the unit-test glob
    (`x-acmeco` with no suffix) all make `observe()` throw and emit no record; a
    valid `x-<orgslug>-*` extension is accepted (positive control).
 4. **Telemetry-stub no-op** — with `enable_anon_telemetry: true` and the real
-   stub, no network primitive is invoked.
+   stub, no network primitive is invoked, including DNS named imports captured
+   before the conformance test module loads.
 5. **Append-only semantics under SIGHUP** — after external rotation and a real
    SIGHUP-driven re-open, the rotated file and the recreated path together hold
    all records, on distinct inodes.
