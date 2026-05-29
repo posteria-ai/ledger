@@ -385,7 +385,14 @@ describe("contract: telemetry-stub no-op", () => {
     // through — so a stub that bypasses the high-level aliases is still caught.
     const spies: { label: string; calls: () => number }[] = [];
     const spy = (obj: object, method: string, label = method): void => {
-      const m = mock.method(obj as never, method as never) as unknown as {
+      const blockNetworkCall = (): never => {
+        throw new Error(`telemetry no-op attempted network via ${label}`);
+      };
+      const m = mock.method(
+        obj as never,
+        method as never,
+        blockNetworkCall as never,
+      ) as unknown as {
         mock: { callCount(): number };
       };
       spies.push({ label, calls: () => m.mock.callCount() });
@@ -473,11 +480,17 @@ describe("contract: append-only semantics under SIGHUP", () => {
       // The setInterval poll below keeps libuv's loop alive until the signal is
       // delivered, and is bounded so a missing handler fails fast (not a hang).
       renameSync(path, rotated);
-      process.kill(process.pid, "SIGHUP");
-      await waitUntil(
-        () => existsSync(path) && statSync(path).ino !== originalIno,
-        "SIGHUP re-open to recreate the audit file at a new inode",
-      );
+      const suppressDefaultSighup = (): void => {};
+      process.on("SIGHUP", suppressDefaultSighup);
+      try {
+        process.kill(process.pid, "SIGHUP");
+        await waitUntil(
+          () => existsSync(path) && statSync(path).ino !== originalIno,
+          "SIGHUP re-open to recreate the audit file at a new inode",
+        );
+      } finally {
+        process.off("SIGHUP", suppressDefaultSighup);
+      }
 
       for (let i = 0; i < k; i++) {
         observer.observe(action({ action_signature: `after(${i})` }));
