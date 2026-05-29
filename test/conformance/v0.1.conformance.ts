@@ -84,30 +84,6 @@ function assertNoRecordEmitted(path: string): void {
   );
 }
 
-/**
- * Reserved-field check scoped to the contract's malformed-field surface: the
- * top-level record envelope and the direct `vdc` envelope only. `vdc.claims` is
- * opaque per the contract and is deliberately NOT scanned — a caller may place
- * any key (even one that collides with a reserved name) inside claims.
- */
-function assertNoReservedEnvelopeFields(rec: Record<string, unknown>): void {
-  for (const key of Object.keys(rec)) {
-    assert.equal(
-      (RESERVED_TOP_LEVEL as readonly string[]).includes(key),
-      false,
-      `reserved top-level field ${key} leaked into the record envelope`,
-    );
-  }
-  const vdc = rec.vdc as Record<string, unknown>;
-  for (const key of Object.keys(vdc)) {
-    assert.equal(
-      (RESERVED_VDC as readonly string[]).includes(key),
-      false,
-      `reserved vdc field ${key} leaked into the vdc envelope`,
-    );
-  }
-}
-
 // RFC 3339 / ISO 8601 instant, e.g. 2026-05-28T12:34:56.789Z.
 const RFC3339 =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
@@ -174,6 +150,13 @@ describe("contract: audit-stream record shape", () => {
     "observer_version",
   ] as const;
   const VDC_FIELDS = ["mandate_id", "issuer", "subject", "claims"] as const;
+  // Every documented top-level record field. host_metadata is optional; any
+  // other non-`x-*` key (an unlisted future `posteria_*` field, a stray
+  // `bogus_key`, etc.) is a non-conforming producer field and must fail.
+  const ALLOWED_RECORD_FIELDS = [
+    ...REQUIRED_FIELDS,
+    "host_metadata",
+  ] as readonly string[];
 
   it("every emitted record carries required fields with pinned literals, a four-field vdc envelope, and no reserved envelope field", async () => {
     const path = join(dir, "audit.jsonl");
@@ -239,9 +222,22 @@ describe("contract: audit-stream record shape", () => {
         "observer_version is non-empty",
       );
 
+      // The top-level record carries only documented fields plus x-*
+      // extensions — this rejects any reserved (named or future `posteria_*`)
+      // or otherwise unrecognized producer field appended to every record.
+      for (const key of Object.keys(rec)) {
+        const isDocumented = ALLOWED_RECORD_FIELDS.includes(key);
+        const isExtension = /^x-[^-]+-.+/.test(key);
+        assert.ok(
+          isDocumented || isExtension,
+          `record carries non-documented, non-extension top-level field ${key}`,
+        );
+      }
+
       const vdc = rec.vdc as Record<string, unknown>;
       // The vdc envelope has exactly the four documented fields plus only
-      // x-* extensions — no other top-level vdc key is permitted.
+      // x-* extensions — no other top-level vdc key is permitted. (claims is
+      // opaque and intentionally not scanned for reserved names.)
       for (const field of VDC_FIELDS) {
         assert.ok(field in vdc, `vdc field ${field} missing`);
       }
@@ -253,8 +249,6 @@ describe("contract: audit-stream record shape", () => {
           `vdc envelope carries non-documented, non-extension field ${key}`,
         );
       }
-
-      assertNoReservedEnvelopeFields(rec);
     }
 
     // record_id uniqueness across the whole sample.
@@ -287,13 +281,16 @@ describe("contract: audit-stream record shape", () => {
 });
 
 describe("contract: producer-side reserved/unrecognized-field rejection", () => {
+  // The contract requires only that observe() throws *some* runtime error and
+  // emits no record — it does not mandate any specific Error.message. A
+  // conforming fork or wrapper may word its diagnostic differently, so these
+  // scenarios assert the behavior (throws + no record), never the wording.
   for (const field of RESERVED_TOP_LEVEL) {
     it(`observe() throws and emits no record for reserved top-level field ${field}`, async () => {
       const path = join(dir, `top-${field}.jsonl`);
       const observer = createObserver({ audit_stream_path: path });
-      assert.throws(
-        () => observer.observe({ ...action(), [field]: {} } as AuditAction),
-        /non-v0.1 field/,
+      assert.throws(() =>
+        observer.observe({ ...action(), [field]: {} } as AuditAction),
       );
       await observer.close();
       assertNoRecordEmitted(path);
@@ -304,14 +301,12 @@ describe("contract: producer-side reserved/unrecognized-field rejection", () => 
     it(`observe() throws and emits no record for reserved vdc field ${field}`, async () => {
       const path = join(dir, `vdc-${field}.jsonl`);
       const observer = createObserver({ audit_stream_path: path });
-      assert.throws(
-        () =>
-          observer.observe(
-            action({
-              vdc: { mandate_id: "m", [field]: {} },
-            } as Partial<AuditAction>),
-          ),
-        /non-v0.1 field/,
+      assert.throws(() =>
+        observer.observe(
+          action({
+            vdc: { mandate_id: "m", [field]: {} },
+          } as Partial<AuditAction>),
+        ),
       );
       await observer.close();
       assertNoRecordEmitted(path);
@@ -321,9 +316,8 @@ describe("contract: producer-side reserved/unrecognized-field rejection", () => 
   it("observe() throws and emits no record for an unrecognized non-namespaced top-level field", async () => {
     const path = join(dir, "unrecognized-top.jsonl");
     const observer = createObserver({ audit_stream_path: path });
-    assert.throws(
-      () => observer.observe({ ...action(), bogus_key: "nope" } as AuditAction),
-      /non-v0.1 field/,
+    assert.throws(() =>
+      observer.observe({ ...action(), bogus_key: "nope" } as AuditAction),
     );
     await observer.close();
     assertNoRecordEmitted(path);
@@ -332,14 +326,12 @@ describe("contract: producer-side reserved/unrecognized-field rejection", () => 
   it("observe() throws and emits no record for an unrecognized non-namespaced field inside vdc", async () => {
     const path = join(dir, "unrecognized-vdc.jsonl");
     const observer = createObserver({ audit_stream_path: path });
-    assert.throws(
-      () =>
-        observer.observe(
-          action({
-            vdc: { mandate_id: "m", bogus_key: "nope" },
-          } as Partial<AuditAction>),
-        ),
-      /non-v0.1 field/,
+    assert.throws(() =>
+      observer.observe(
+        action({
+          vdc: { mandate_id: "m", bogus_key: "nope" },
+        } as Partial<AuditAction>),
+      ),
     );
     await observer.close();
     assertNoRecordEmitted(path);
@@ -348,24 +340,20 @@ describe("contract: producer-side reserved/unrecognized-field rejection", () => 
   it("observe() throws and emits no record for a malformed pseudo-namespace (x-acmeco with no suffix) at top level and in vdc", async () => {
     const topPath = join(dir, "malformed-top.jsonl");
     const topObserver = createObserver({ audit_stream_path: topPath });
-    assert.throws(
-      () =>
-        topObserver.observe({ ...action(), "x-acmeco": "no-suffix" } as AuditAction),
-      /non-v0.1 field/,
+    assert.throws(() =>
+      topObserver.observe({ ...action(), "x-acmeco": "no-suffix" } as AuditAction),
     );
     await topObserver.close();
     assertNoRecordEmitted(topPath);
 
     const vdcPath = join(dir, "malformed-vdc.jsonl");
     const vdcObserver = createObserver({ audit_stream_path: vdcPath });
-    assert.throws(
-      () =>
-        vdcObserver.observe(
-          action({
-            vdc: { mandate_id: "m", "x-acmeco": "no-suffix" },
-          } as Partial<AuditAction>),
-        ),
-      /non-v0.1 field/,
+    assert.throws(() =>
+      vdcObserver.observe(
+        action({
+          vdc: { mandate_id: "m", "x-acmeco": "no-suffix" },
+        } as Partial<AuditAction>),
+      ),
     );
     await vdcObserver.close();
     assertNoRecordEmitted(vdcPath);
@@ -414,6 +402,7 @@ describe("contract: telemetry-stub no-op", () => {
     spy(dns, "lookup", "dns.lookup");
     spy(dns, "resolve", "dns.resolve");
     spy(dns.promises, "lookup", "dns.promises.lookup");
+    spy(dns.promises, "resolve", "dns.promises.resolve");
     spy(dgram, "createSocket", "dgram.createSocket");
     spy(tls, "connect", "tls.connect");
     if (typeof globalThis.fetch === "function") {
