@@ -76,6 +76,21 @@ const SHORT_CIRCUIT: ObserverDecision = Object.freeze({
   decision_reason: OBSERVER_DECISION_REASON,
 });
 
+// `x-<orgslug>-<rest>`: a non-empty orgslug, then at least one more segment.
+// This admits third-party namespaced extensions while excluding reserved
+// `posteria_*` and any non-namespaced field — neither matches.
+const EXTENSION_KEY = /^x-[^-]+-.+/;
+
+/** Reference-preserving copy of caller-supplied `x-<orgslug>-*` extension keys onto `target`. */
+function copyExtensions(
+  source: Record<string, unknown>,
+  target: Record<string, unknown>,
+): void {
+  for (const key of Object.keys(source)) {
+    if (EXTENSION_KEY.test(key)) target[key] = source[key];
+  }
+}
+
 /** Walk up from this module to the package.json that owns it, for observer_version. */
 function readObserverVersion(): string {
   let dir = dirname(fileURLToPath(import.meta.url));
@@ -104,12 +119,19 @@ const OBSERVER_VERSION = readObserverVersion();
  * documented defaults.
  */
 function normalizeVdc(input: VdcInput | undefined): VdcEnvelope {
-  return {
+  const envelope: VdcEnvelope = {
     mandate_id: input?.mandate_id ?? null,
     issuer: input?.issuer ?? null,
     subject: input?.subject ?? null,
     claims: input?.claims ?? {},
   };
+  if (input) {
+    copyExtensions(
+      input as Record<string, unknown>,
+      envelope as unknown as Record<string, unknown>,
+    );
+  }
+  return envelope;
 }
 
 export function createObserver(config?: Partial<ObserverConfig>): Observer {
@@ -133,6 +155,10 @@ export function createObserver(config?: Partial<ObserverConfig>): Observer {
         observer_version: OBSERVER_VERSION,
       };
       if (hasHostMetadata) record.host_metadata = resolved.host_metadata;
+      copyExtensions(
+        action as unknown as Record<string, unknown>,
+        record as unknown as Record<string, unknown>,
+      );
 
       // Fire-and-forget per Option C: the decision is always `allow`, so the
       // audit write stays off the hot path. The sink coalesces queued records

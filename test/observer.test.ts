@@ -120,6 +120,48 @@ describe("VDC normalization", () => {
   });
 });
 
+describe("namespaced extension pass-through", () => {
+  it("copies x-<orgslug>-* fields from the action to the record top level", async () => {
+    const { observer, path } = newObserver();
+    observer.observe(action({ "x-acmeco-trace_id": "abc123" }));
+    await observer.close();
+    const [rec] = readRecords(path);
+    assert.equal(rec!["x-acmeco-trace_id"], "abc123");
+  });
+
+  it("copies x-<orgslug>-* fields from the supplied vdc into the envelope", async () => {
+    const { observer, path } = newObserver();
+    observer.observe(
+      action({ vdc: { mandate_id: "m-1", "x-acmeco-purpose": "audit" } }),
+    );
+    await observer.close();
+    const [rec] = readRecords(path);
+    assert.deepEqual(rec!.vdc, {
+      mandate_id: "m-1",
+      issuer: null,
+      subject: null,
+      claims: {},
+      "x-acmeco-purpose": "audit",
+    });
+  });
+
+  it("does not emit reserved or non-namespaced extra fields", async () => {
+    const { observer, path } = newObserver();
+    const input = {
+      ...action(),
+      posteria_internal: "reserved",
+      arbitrary_field: "nope",
+      "x-acmeco": "missing-suffix",
+    } as AuditAction;
+    observer.observe(input);
+    await observer.close();
+    const [rec] = readRecords(path);
+    assert.equal("posteria_internal" in rec!, false);
+    assert.equal("arbitrary_field" in rec!, false);
+    assert.equal("x-acmeco" in rec!, false);
+  });
+});
+
 describe("record envelope", () => {
   it("emits the pinned version/decision constants and a package-matching observer_version", async () => {
     const { observer, path } = newObserver();
