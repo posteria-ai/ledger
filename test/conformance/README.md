@@ -4,10 +4,9 @@ This directory holds the v0.1 conformance acceptance suite for
 `@posteria/ledger`. The suite has landed.
 
 It is the canonical validator of the producer-side obligations in
-`docs/contract/v0.1.md` (and
-`specs/007-ledger-mode-and-positioning/contracts/ledger-api.md`
-§"Conformance Test Expectations"). Each contract clause maps to one named
-test, so a failing test name states the violated clause directly.
+`docs/contract/v0.1.md` (see §"Conformance Test Expectations"). Each contract
+clause maps to one named test, so a failing test name states the violated
+clause directly.
 
 ## Running
 
