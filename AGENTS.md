@@ -1,10 +1,10 @@
-# Posteria Observer Development Rules
+# Posteria Ledger Development Rules
 
 ## Operating Principles
 
 - Treat `docs/contract/v0.1.md` as the source of truth for public behavior,
   record shape, configuration semantics, and conformance expectations.
-- Keep Observer as the identity-function open subset of Posteria: record the
+- Keep Ledger as the identity-function open subset of Posteria: record the
   boundary event, return `allow`, and do not mutate payloads.
 - Do not hide uncertainty. State assumptions, ambiguities, and tradeoffs before
   implementation when scope or contract behavior is unclear.
@@ -21,13 +21,13 @@
 
 ## Scope Guardrails
 
-- Observer MUST NOT evaluate policy, constitutions, mandates, or rules.
-- Observer MUST NOT block, refuse, redact, rewrite, or otherwise modify calls.
-- Observer MUST NOT mint, sign, attest, or anchor VDC records in v0.1.
-- Observer MUST NOT open network sockets or transmit audit content at runtime
+- Ledger MUST NOT evaluate policy, constitutions, mandates, or rules.
+- Ledger MUST NOT block, refuse, redact, rewrite, or otherwise modify calls.
+- Ledger MUST NOT mint, sign, attest, or anchor VDC records in v0.1.
+- Ledger MUST NOT open network sockets or transmit audit content at runtime
   in v0.1, including when telemetry is enabled.
-- Observer MUST NOT consume the audit stream within Observer itself.
-- Observer MUST preserve the reserved `posteria_*` field set and the
+- Ledger MUST NOT consume the audit stream within Ledger itself.
+- Ledger MUST preserve the reserved `posteria_*` field set and the
   `x-<orgslug>-*` namespace convention from the v0.1 contract.
 - Runtime, record-shape, configuration, telemetry, and dependency changes are
   contract-level changes. Check `docs/contract/v0.1.md` and update public docs

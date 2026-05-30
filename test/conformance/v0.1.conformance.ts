@@ -21,7 +21,7 @@ import tls from "node:tls";
 import { afterEach, beforeEach, describe, it, mock } from "node:test";
 
 import { resolveConfig } from "../../src/config.js";
-import { createObserver, type AuditAction } from "../../src/index.js";
+import { createLedger, type AuditAction } from "../../src/index.js";
 
 // The six reserved field sets the producer obligation forbids (see
 // docs/contract/v0.1.md "Extension Hooks" and "Reserved VDC envelope
@@ -46,7 +46,7 @@ const RESERVED_VDC = [
 let dir: string;
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), "posteria-observer-conformance-"));
+  dir = mkdtempSync(join(tmpdir(), "posteria-ledger-conformance-"));
 });
 
 afterEach(() => {
@@ -73,7 +73,7 @@ function readRecords(path: string): Record<string, unknown>[] {
 /**
  * Assert the emit-no-record obligation strictly: a missing or empty file is the
  * only passing state. Any non-empty content fails — including a partial or
- * malformed line written before observe() threw, which must NOT be silently
+ * malformed line written before record() threw, which must NOT be silently
  * treated as "zero records".
  */
 function assertNoRecordEmitted(path: string): void {
@@ -148,7 +148,7 @@ async function waitUntil(
 describe("contract: identity-function decision behavior", () => {
   it("returns allow + observer_short_circuit for every well-formed input, mutates no payload, and records exactly N", async () => {
     const path = join(dir, "audit.jsonl");
-    const observer = createObserver({ audit_stream_path: path });
+    const ledger = createLedger({ audit_stream_path: path });
     const n = 1024;
 
     for (let i = 0; i < n; i++) {
@@ -165,7 +165,7 @@ describe("contract: identity-function decision behavior", () => {
       });
       const clone = structuredClone(input);
 
-      const decision = observer.observe(input);
+      const decision = ledger.record(input);
       assert.deepEqual(decision, {
         decision: "allow",
         decision_reason: "observer_short_circuit",
@@ -174,7 +174,7 @@ describe("contract: identity-function decision behavior", () => {
       assert.deepEqual(input, clone);
     }
 
-    await observer.close();
+    await ledger.close();
     assert.equal(readRecords(path).length, n);
   });
 });
@@ -202,7 +202,7 @@ describe("contract: audit-stream record shape", () => {
 
   it("every emitted record carries required fields with pinned literals, a four-field vdc envelope, and no reserved envelope field", async () => {
     const path = join(dir, "audit.jsonl");
-    const observer = createObserver({ audit_stream_path: path });
+    const ledger = createLedger({ audit_stream_path: path });
 
     // A mix of vdc shapes so the validator also exercises the documented
     // defaults for omitted fields, not only fully-populated envelopes.
@@ -235,8 +235,8 @@ describe("contract: audit-stream record shape", () => {
       );
     }
 
-    for (const input of inputs) observer.observe(input);
-    await observer.close();
+    for (const input of inputs) ledger.record(input);
+    await ledger.close();
 
     const records = readRecords(path);
     assert.equal(records.length, inputs.length);
@@ -323,75 +323,75 @@ describe("contract: audit-stream record shape", () => {
 });
 
 describe("contract: producer-side reserved/unrecognized-field rejection", () => {
-  // The contract requires only that observe() throws *some* runtime error and
+  // The contract requires only that record() throws *some* runtime error and
   // emits no record — it does not mandate any specific Error.message. A
   // conforming fork or wrapper may word its diagnostic differently, so these
   // scenarios assert the behavior (throws + no record), never the wording.
   for (const field of RESERVED_TOP_LEVEL) {
-    it(`observe() throws and emits no record for reserved top-level field ${field}`, async () => {
+    it(`record() throws and emits no record for reserved top-level field ${field}`, async () => {
       const path = join(dir, `top-${field}.jsonl`);
-      const observer = createObserver({ audit_stream_path: path });
+      const ledger = createLedger({ audit_stream_path: path });
       assert.throws(() =>
-        observer.observe({ ...action(), [field]: {} } as AuditAction),
+        ledger.record({ ...action(), [field]: {} } as AuditAction),
       );
-      await observer.close();
+      await ledger.close();
       assertNoRecordEmitted(path);
     });
   }
 
   for (const field of RESERVED_VDC) {
-    it(`observe() throws and emits no record for reserved vdc field ${field}`, async () => {
+    it(`record() throws and emits no record for reserved vdc field ${field}`, async () => {
       const path = join(dir, `vdc-${field}.jsonl`);
-      const observer = createObserver({ audit_stream_path: path });
+      const ledger = createLedger({ audit_stream_path: path });
       assert.throws(() =>
-        observer.observe(
+        ledger.record(
           action({
             vdc: { mandate_id: "m", [field]: {} },
           } as Partial<AuditAction>),
         ),
       );
-      await observer.close();
+      await ledger.close();
       assertNoRecordEmitted(path);
     });
   }
 
-  it("observe() throws and emits no record for an unrecognized non-namespaced top-level field", async () => {
+  it("record() throws and emits no record for an unrecognized non-namespaced top-level field", async () => {
     const path = join(dir, "unrecognized-top.jsonl");
-    const observer = createObserver({ audit_stream_path: path });
+    const ledger = createLedger({ audit_stream_path: path });
     assert.throws(() =>
-      observer.observe({ ...action(), bogus_key: "nope" } as AuditAction),
+      ledger.record({ ...action(), bogus_key: "nope" } as AuditAction),
     );
-    await observer.close();
+    await ledger.close();
     assertNoRecordEmitted(path);
   });
 
-  it("observe() throws and emits no record for an unrecognized non-namespaced field inside vdc", async () => {
+  it("record() throws and emits no record for an unrecognized non-namespaced field inside vdc", async () => {
     const path = join(dir, "unrecognized-vdc.jsonl");
-    const observer = createObserver({ audit_stream_path: path });
+    const ledger = createLedger({ audit_stream_path: path });
     assert.throws(() =>
-      observer.observe(
+      ledger.record(
         action({
           vdc: { mandate_id: "m", bogus_key: "nope" },
         } as Partial<AuditAction>),
       ),
     );
-    await observer.close();
+    await ledger.close();
     assertNoRecordEmitted(path);
   });
 
-  it("observe() throws and emits no record for a malformed pseudo-namespace (x-acmeco with no suffix) at top level and in vdc", async () => {
+  it("record() throws and emits no record for a malformed pseudo-namespace (x-acmeco with no suffix) at top level and in vdc", async () => {
     const topPath = join(dir, "malformed-top.jsonl");
-    const topObserver = createObserver({ audit_stream_path: topPath });
+    const topObserver = createLedger({ audit_stream_path: topPath });
     assert.throws(() =>
-      topObserver.observe({ ...action(), "x-acmeco": "no-suffix" } as AuditAction),
+      topObserver.record({ ...action(), "x-acmeco": "no-suffix" } as AuditAction),
     );
     await topObserver.close();
     assertNoRecordEmitted(topPath);
 
     const vdcPath = join(dir, "malformed-vdc.jsonl");
-    const vdcObserver = createObserver({ audit_stream_path: vdcPath });
+    const vdcObserver = createLedger({ audit_stream_path: vdcPath });
     assert.throws(() =>
-      vdcObserver.observe(
+      vdcObserver.record(
         action({
           vdc: { mandate_id: "m", "x-acmeco": "no-suffix" },
         } as Partial<AuditAction>),
@@ -403,14 +403,14 @@ describe("contract: producer-side reserved/unrecognized-field rejection", () => 
 
   it("accepts a valid x-<orgslug>-* extension at top level and in vdc (positive control)", async () => {
     const path = join(dir, "positive-control.jsonl");
-    const observer = createObserver({ audit_stream_path: path });
-    observer.observe(
+    const ledger = createLedger({ audit_stream_path: path });
+    ledger.record(
       action({
         "x-acmeco-trace_id": "abc",
         vdc: { mandate_id: "m", "x-acmeco-purpose": "audit" },
       }),
     );
-    await observer.close();
+    await ledger.close();
     const [rec] = readRecords(path);
     assert.equal(rec!["x-acmeco-trace_id"], "abc");
     assert.equal(
@@ -509,13 +509,13 @@ describe("contract: telemetry-stub no-op", () => {
 
     const path = join(dir, "audit.jsonl");
     // Real stub: no internals seam supplied.
-    const observer = createObserver({
+    const ledger = createLedger({
       audit_stream_path: path,
       enable_anon_telemetry: true,
     });
     const n = 50;
-    for (let i = 0; i < n; i++) observer.observe(action());
-    await observer.close();
+    for (let i = 0; i < n; i++) ledger.record(action());
+    await ledger.close();
 
     for (const { label, calls } of spies) {
       assert.equal(calls(), 0, `telemetry no-op invoked ${label}`);
@@ -525,19 +525,19 @@ describe("contract: telemetry-stub no-op", () => {
 });
 
 describe("contract: append-only semantics under SIGHUP", () => {
-  it("observe()s K records, rotates + SIGHUPs, observe()s K more, and all 2K survive across distinct inodes", async () => {
+  it("record()s K records, rotates + SIGHUPs, record()s K more, and all 2K survive across distinct inodes", async () => {
     const path = join(dir, "audit.jsonl");
     const rotated = join(dir, "audit.jsonl.1");
     const k = 200;
 
-    // Exercise the PUBLIC Observer path, not the sink directly: createObserver
+    // Exercise the PUBLIC Ledger path, not the sink directly: createLedger
     // installs the SIGHUP handler by default, so a real signal drives the
     // re-open exactly as a host operator's log-rotation tooling would.
-    const observer = createObserver({ audit_stream_path: path });
+    const ledger = createLedger({ audit_stream_path: path });
 
     try {
       for (let i = 0; i < k; i++) {
-        observer.observe(action({ action_signature: `before(${i})` }));
+        ledger.record(action({ action_signature: `before(${i})` }));
       }
       // close() is the only public drain primitive, but it also closes; instead
       // rely on the re-open's fsync to flush the pre-rotation batch. Capture the
@@ -561,9 +561,9 @@ describe("contract: append-only semantics under SIGHUP", () => {
       }
 
       for (let i = 0; i < k; i++) {
-        observer.observe(action({ action_signature: `after(${i})` }));
+        ledger.record(action({ action_signature: `after(${i})` }));
       }
-      await observer.close();
+      await ledger.close();
 
       const before = readRecords(rotated);
       const after = readRecords(path);
@@ -593,13 +593,13 @@ describe("contract: append-only semantics under SIGHUP", () => {
     } finally {
       // close() removes the SIGHUP handler; ensure it ran even on failure so
       // the handler does not leak into other tests. Idempotent.
-      await observer.close();
+      await ledger.close();
     }
   });
 });
 
 describe("contract: unknown configuration key warns, it does not fail", () => {
-  it("resolveConfig warns on an unrecognized key and does not throw, and createObserver tolerates it", async () => {
+  it("resolveConfig warns on an unrecognized key and does not throw, and createLedger tolerates it", async () => {
     const warnings: string[] = [];
     assert.doesNotThrow(() => {
       resolveConfig({
@@ -610,17 +610,17 @@ describe("contract: unknown configuration key warns, it does not fail", () => {
     assert.equal(warnings.length, 1);
     assert.match(warnings[0]!, /unknown configuration key/);
 
-    // The public path (createObserver) has no warn injection point, so it
+    // The public path (createLedger) has no warn injection point, so it
     // defaults to stderr. Capture stderr to prove the warning is actually
     // surfaced there — and still that construction does not throw.
     const stderrSpy = mock.method(process.stderr, "write", () => true);
     const path = join(dir, "audit.jsonl");
-    let observer!: ReturnType<typeof createObserver>;
+    let ledger!: ReturnType<typeof createLedger>;
     assert.doesNotThrow(() => {
-      observer = createObserver({
+      ledger = createLedger({
         audit_stream_path: path,
         unrecognized_key: true,
-      } as Parameters<typeof createObserver>[0]);
+      } as Parameters<typeof createLedger>[0]);
     });
     const stderrOutput = stderrSpy.mock.calls
       .map((c) => String(c.arguments[0]))
@@ -628,6 +628,6 @@ describe("contract: unknown configuration key warns, it does not fail", () => {
     stderrSpy.mock.restore();
     assert.match(stderrOutput, /unknown configuration key/);
 
-    await observer.close();
+    await ledger.close();
   });
 });

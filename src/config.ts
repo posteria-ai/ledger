@@ -1,15 +1,15 @@
 import {
   DEFAULT_AUDIT_STREAM_PATH,
-  type ObserverConfig,
+  type LedgerConfig,
 } from "./index.js";
 
-/** Env-variable prefix for all Observer configuration knobs. */
-export const ENV_PREFIX = "POSTERIA_OBSERVER_";
+/** Env-variable prefix for all Ledger configuration knobs. */
+export const ENV_PREFIX = "POSTERIA_LEDGER_";
 
 type KnobType = "string" | "boolean" | "object";
 
 interface KnobDef {
-  key: keyof ObserverConfig;
+  key: keyof LedgerConfig;
   type: KnobType;
   env: string;
   cliFlag: string;
@@ -40,7 +40,7 @@ const KNOWN_KEYS: ReadonlySet<string> = new Set(KNOBS.map((k) => k.key));
 
 export interface ConfigSources {
   /** Programmatic constructor options (lowest precedence). */
-  programmatic?: Partial<ObserverConfig> & Record<string, unknown>;
+  programmatic?: Partial<LedgerConfig> & Record<string, unknown>;
   /** Environment bag; defaults to `process.env`. */
   env?: Record<string, string | undefined>;
   /**
@@ -55,7 +55,7 @@ export interface ConfigSources {
   warn?: (message: string) => void;
 }
 
-function freshDefaults(): ObserverConfig {
+function freshDefaults(): LedgerConfig {
   return {
     audit_stream_path: DEFAULT_AUDIT_STREAM_PATH,
     enable_anon_telemetry: false,
@@ -83,7 +83,7 @@ function parseBoolean(
   if (normalized === "true") return true;
   if (normalized === "false") return false;
   warn(
-    `[posteria-observer] ignoring ${source}: expected "true" or "false", got ${JSON.stringify(raw)}`,
+    `[posteria-ledger] ignoring ${source}: expected "true" or "false", got ${JSON.stringify(raw)}`,
   );
   return undefined;
 }
@@ -97,18 +97,18 @@ function parseObject(
   try {
     parsed = JSON.parse(raw);
   } catch {
-    warn(`[posteria-observer] ignoring ${source}: expected valid JSON`);
+    warn(`[posteria-ledger] ignoring ${source}: expected valid JSON`);
     return undefined;
   }
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-    warn(`[posteria-observer] ignoring ${source}: expected a JSON object`);
+    warn(`[posteria-ledger] ignoring ${source}: expected a JSON object`);
     return undefined;
   }
   return parsed as Record<string, unknown>;
 }
 
 function assignParsed(
-  config: ObserverConfig,
+  config: LedgerConfig,
   knob: KnobDef,
   raw: string,
   source: string,
@@ -128,21 +128,21 @@ function assignParsed(
 }
 
 function applyProgrammatic(
-  config: ObserverConfig,
+  config: LedgerConfig,
   programmatic: Record<string, unknown>,
   warn: (m: string) => void,
 ): void {
   for (const [key, value] of Object.entries(programmatic)) {
     if (!KNOWN_KEYS.has(key)) {
-      warn(`[posteria-observer] unknown configuration key: ${JSON.stringify(key)}`);
+      warn(`[posteria-ledger] unknown configuration key: ${JSON.stringify(key)}`);
       continue;
     }
-    if (value !== undefined) config[key as keyof ObserverConfig] = value as never;
+    if (value !== undefined) config[key as keyof LedgerConfig] = value as never;
   }
 }
 
 function applyEnv(
-  config: ObserverConfig,
+  config: LedgerConfig,
   env: Record<string, string | undefined>,
   warn: (m: string) => void,
 ): void {
@@ -155,12 +155,12 @@ function applyEnv(
   for (const name of Object.keys(env)) {
     if (!name.startsWith(ENV_PREFIX)) continue;
     if (KNOBS.some((knob) => knob.env === name)) continue;
-    warn(`[posteria-observer] unknown configuration key: ${JSON.stringify(name)}`);
+    warn(`[posteria-ledger] unknown configuration key: ${JSON.stringify(name)}`);
   }
 }
 
 function applyCli(
-  config: ObserverConfig,
+  config: LedgerConfig,
   argv: string[],
   warn: (m: string) => void,
 ): void {
@@ -182,7 +182,7 @@ function applyCli(
     }
     const next = argv[i + 1];
     if (next === undefined || next.startsWith("--")) {
-      warn(`[posteria-observer] ignoring flag ${name}: missing value`);
+      warn(`[posteria-ledger] ignoring flag ${name}: missing value`);
       continue;
     }
     assignParsed(config, knob, next, `flag ${name}`, warn);
@@ -192,13 +192,13 @@ function applyCli(
 
 /**
  * Resolve effective configuration from the three contract sources with
- * later-wins precedence: programmatic options < POSTERIA_OBSERVER_* env <
+ * later-wins precedence: programmatic options < POSTERIA_LEDGER_* env <
  * CLI flags. Unknown keys warn but never abort. The returned object is
  * deeply frozen — nested object values (host_metadata) are read-only too.
  */
 export function resolveConfig(
   sources: ConfigSources = {},
-): Readonly<ObserverConfig> {
+): Readonly<LedgerConfig> {
   const warn =
     sources.warn ?? ((message: string) => process.stderr.write(`${message}\n`));
   const env = sources.env ?? process.env;

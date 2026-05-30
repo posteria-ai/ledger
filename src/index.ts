@@ -8,12 +8,12 @@ import { resolveConfig } from "./config.js";
 import { emitTelemetryNoop } from "./telemetry.js";
 
 export const RECORD_VERSION = "0.1.0" as const;
-export const OBSERVER_DECISION = "allow" as const;
-export const OBSERVER_DECISION_REASON = "observer_short_circuit" as const;
+export const LEDGER_DECISION = "allow" as const;
+export const LEDGER_DECISION_REASON = "observer_short_circuit" as const;
 export const DEFAULT_AUDIT_STREAM_PATH =
-  "./posteria-observer-audit.jsonl" as const;
+  "./posteria-ledger-audit.jsonl" as const;
 
-export interface ObserverConfig {
+export interface LedgerConfig {
   audit_stream_path: string;
   enable_anon_telemetry: boolean;
   host_metadata: Record<string, unknown>;
@@ -49,32 +49,32 @@ export interface AuditRecord {
   action_kind: string;
   action_signature: string;
   vdc: VdcEnvelope;
-  decision: typeof OBSERVER_DECISION;
-  decision_reason: typeof OBSERVER_DECISION_REASON;
+  decision: typeof LEDGER_DECISION;
+  decision_reason: typeof LEDGER_DECISION_REASON;
   observer_version: string;
   host_metadata?: Record<string, unknown>;
   [extensionKey: `x-${string}-${string}`]: unknown;
 }
 
-export interface ObserverDecision {
-  decision: typeof OBSERVER_DECISION;
-  decision_reason: typeof OBSERVER_DECISION_REASON;
+export interface LedgerDecision {
+  decision: typeof LEDGER_DECISION;
+  decision_reason: typeof LEDGER_DECISION_REASON;
 }
 
-export interface Observer {
+export interface Ledger {
   /** Synchronous identity-function decision. Records an audit entry as a side effect (fire-and-forget; flushed on close()). */
-  observe(action: AuditAction): ObserverDecision;
+  record(action: AuditAction): LedgerDecision;
 
   /** Drain pending audit writes and close the underlying sink. Resolves when records are durably on disk. Idempotent. */
   close(): Promise<void>;
 
   /** Resolved configuration (read-only). */
-  readonly config: Readonly<ObserverConfig>;
+  readonly config: Readonly<LedgerConfig>;
 }
 
-const SHORT_CIRCUIT: ObserverDecision = Object.freeze({
-  decision: OBSERVER_DECISION,
-  decision_reason: OBSERVER_DECISION_REASON,
+const SHORT_CIRCUIT: LedgerDecision = Object.freeze({
+  decision: LEDGER_DECISION,
+  decision_reason: LEDGER_DECISION_REASON,
 });
 
 // `x-<orgslug>-<rest>`: a non-empty orgslug, then at least one more segment.
@@ -96,12 +96,12 @@ const ALLOWED_VDC_KEYS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Reject runtime input that would force Observer to emit a non-v0.1 record.
- * observe() accepts only documented v0.1 fields plus `x-<orgslug>-*`
+ * Reject runtime input that would force Ledger to emit a non-v0.1 record.
+ * record() accepts only documented v0.1 fields plus `x-<orgslug>-*`
  * extensions; any reserved `posteria_*` field, reserved `vdc.*` field,
  * unrecognized non-namespaced field, or malformed pseudo-namespace (e.g.
  * `x-acmeco` with no suffix) throws before any audit record is enqueued. This
- * enforces Observer's producer obligation by rejecting malformed input — it is
+ * enforces Ledger's producer obligation by rejecting malformed input — it is
  * not policy evaluation, and valid inputs remain the identity function.
  */
 function assertOnlyDocumentedFields(
@@ -112,7 +112,7 @@ function assertOnlyDocumentedFields(
   for (const key of Object.keys(source)) {
     if (allowed.has(key) || EXTENSION_KEY.test(key)) continue;
     throw new Error(
-      `[posteria-observer] observe() rejected non-v0.1 field ${JSON.stringify(key)} on ${location}: only documented v0.1 fields and x-<orgslug>-* extensions are accepted; no audit record was emitted`,
+      `[posteria-ledger] record() rejected non-v0.1 field ${JSON.stringify(key)} on ${location}: only documented v0.1 fields and x-<orgslug>-* extensions are accepted; no audit record was emitted`,
     );
   }
 }
@@ -128,14 +128,14 @@ function copyExtensions(
 }
 
 /** Walk up from this module to the package.json that owns it, for observer_version. */
-function readObserverVersion(): string {
+function readLedgerVersion(): string {
   let dir = dirname(fileURLToPath(import.meta.url));
   for (let depth = 0; depth < 10; depth++) {
     try {
       const pkg = JSON.parse(
         readFileSync(join(dir, "package.json"), "utf8"),
       ) as { name?: string; version?: string };
-      if (pkg.name === "@posteria/observer" && pkg.version) return pkg.version;
+      if (pkg.name === "@posteria/ledger" && pkg.version) return pkg.version;
     } catch {
       // not here; keep walking up
     }
@@ -146,7 +146,7 @@ function readObserverVersion(): string {
   return "0.0.0";
 }
 
-const OBSERVER_VERSION = readObserverVersion();
+const LEDGER_VERSION = readLedgerVersion();
 
 /**
  * Structural normalization only — never semantic interpretation. Emits all
@@ -174,23 +174,23 @@ function normalizeVdc(input: VdcInput | undefined): VdcEnvelope {
  * Test seam: lets the unit suite inject a telemetry spy. `@internal` + the
  * project's `stripInternal` keep both this interface and the two-arg overload
  * out of the published `dist/index.d.ts`, so the public signature stays
- * `createObserver(config?)`.
+ * `createLedger(config?)`.
  * @internal
  */
-interface ObserverInternals {
+interface LedgerInternals {
   telemetry?: () => unknown;
 }
 
-export function createObserver(config?: Partial<ObserverConfig>): Observer;
+export function createLedger(config?: Partial<LedgerConfig>): Ledger;
 /** @internal test seam — stripped from the published types. */
-export function createObserver(
-  config: Partial<ObserverConfig> | undefined,
-  internals: ObserverInternals,
-): Observer;
-export function createObserver(
-  config?: Partial<ObserverConfig>,
-  internals?: ObserverInternals,
-): Observer {
+export function createLedger(
+  config: Partial<LedgerConfig> | undefined,
+  internals: LedgerInternals,
+): Ledger;
+export function createLedger(
+  config?: Partial<LedgerConfig>,
+  internals?: LedgerInternals,
+): Ledger {
   const resolved = resolveConfig({ programmatic: config });
   const sink = createAuditSink({ path: resolved.audit_stream_path });
   const hasHostMetadata = Object.keys(resolved.host_metadata).length > 0;
@@ -200,7 +200,7 @@ export function createObserver(
   return {
     config: resolved,
 
-    observe(action: AuditAction): ObserverDecision {
+    record(action: AuditAction): LedgerDecision {
       // Guard before building or enqueueing anything: a caller that supplies a
       // reserved or unrecognized field is trying to produce a non-v0.1 record,
       // so reject the call rather than silently dropping their data.
@@ -224,9 +224,9 @@ export function createObserver(
         action_kind: action.action_kind,
         action_signature: action.action_signature,
         vdc: normalizeVdc(action.vdc),
-        decision: OBSERVER_DECISION,
-        decision_reason: OBSERVER_DECISION_REASON,
-        observer_version: OBSERVER_VERSION,
+        decision: LEDGER_DECISION,
+        decision_reason: LEDGER_DECISION_REASON,
+        observer_version: LEDGER_VERSION,
       };
       if (hasHostMetadata) record.host_metadata = resolved.host_metadata;
       copyExtensions(
@@ -237,7 +237,7 @@ export function createObserver(
       // Fire-and-forget per Option C: the decision is always `allow`, so the
       // audit write stays off the hot path. The sink coalesces queued records
       // and flushes them on its own cadence; close() is the deterministic
-      // drain primitive for graceful shutdown. A hard crash between observe()
+      // drain primitive for graceful shutdown. A hard crash between record()
       // and the next flush can lose the in-flight record — the documented v0.1
       // durability trade-off.
       sink.write(record);

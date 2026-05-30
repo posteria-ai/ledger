@@ -3,8 +3,8 @@ import { describe, it } from "node:test";
 import type {
   AuditAction,
   AuditRecord,
-  ObserverConfig,
-  ObserverDecision,
+  LedgerConfig,
+  LedgerDecision,
   VdcEnvelope,
   VdcInput,
 } from "../src/index.js";
@@ -100,17 +100,17 @@ describe("v0.1 contract type compatibility — positive cases", () => {
     void _action;
   });
 
-  it("compiles a literal-typed ObserverDecision", () => {
-    const _decision: ObserverDecision = {
+  it("compiles a literal-typed LedgerDecision", () => {
+    const _decision: LedgerDecision = {
       decision: "allow",
       decision_reason: "observer_short_circuit",
     };
     void _decision;
   });
 
-  it("compiles a full ObserverConfig", () => {
-    const _config: ObserverConfig = {
-      audit_stream_path: "./posteria-observer-audit.jsonl",
+  it("compiles a full LedgerConfig", () => {
+    const _config: LedgerConfig = {
+      audit_stream_path: "./posteria-ledger-audit.jsonl",
       enable_anon_telemetry: false,
       host_metadata: {},
     };
@@ -190,7 +190,7 @@ describe("v0.1 contract type compatibility — negative cases", () => {
   });
 
   it("rejects literal mismatch on decision", () => {
-    const _bad: ObserverDecision = {
+    const _bad: LedgerDecision = {
       // @ts-expect-error v0.1 emits only "allow"
       decision: "deny",
       decision_reason: "observer_short_circuit",
@@ -199,7 +199,7 @@ describe("v0.1 contract type compatibility — negative cases", () => {
   });
 
   it("rejects literal mismatch on decision_reason", () => {
-    const _bad: ObserverDecision = {
+    const _bad: LedgerDecision = {
       decision: "allow",
       // @ts-expect-error v0.1 emits only "observer_short_circuit"
       decision_reason: "policy_match",

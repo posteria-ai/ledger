@@ -1,22 +1,22 @@
-# Contributing to @posteria/observer
+# Contributing to @posteria/ledger
 
-Thanks for the interest. Observer is a small, deliberately-narrow project,
+Thanks for the interest. Ledger is a small, deliberately-narrow project,
 and contribution discipline reflects that.
 
 ## Scope discipline (read before opening a PR)
 
-Observer is the identity-function open subset of Posteria. The v0.1 contract
+Ledger is the identity-function open subset of Posteria. The v0.1 contract
 is canonical. PRs that would:
 
 - Add policy evaluation, blocking, redaction, or any payload mutation,
 - Add cryptographic attestation or signing in v0.1,
 - Open network sockets at runtime,
-- Consume the audit stream within Observer itself,
+- Consume the audit stream within Ledger itself,
 - Remove or rename the reserved `posteria_*` field set or
   `x-<orgslug>-*` namespace convention,
 
 are out of scope. A fork that adds any of the above is welcome under MIT,
-but it is NOT `@posteria/observer` and MUST be renamed.
+but it is NOT `@posteria/ledger` and MUST be renamed.
 
 If you want to discuss whether a change is in scope, open an issue first.
 

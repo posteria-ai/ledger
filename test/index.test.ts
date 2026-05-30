@@ -5,20 +5,20 @@ import { describe, it } from "node:test";
 import {
   type AuditRecord,
   type VdcEnvelope,
-  createObserver,
+  createLedger,
   DEFAULT_AUDIT_STREAM_PATH,
-  OBSERVER_DECISION,
-  OBSERVER_DECISION_REASON,
+  LEDGER_DECISION,
+  LEDGER_DECISION_REASON,
   RECORD_VERSION,
 } from "../src/index.js";
 
-describe("createObserver", () => {
-  it("returns a working Observer without throwing", async () => {
-    const observer = createObserver();
-    assert.equal(typeof observer.observe, "function");
-    assert.equal(typeof observer.close, "function");
-    assert.equal(observer.config.audit_stream_path, DEFAULT_AUDIT_STREAM_PATH);
-    await observer.close();
+describe("createLedger", () => {
+  it("returns a working Ledger without throwing", async () => {
+    const ledger = createLedger();
+    assert.equal(typeof ledger.record, "function");
+    assert.equal(typeof ledger.close, "function");
+    assert.equal(ledger.config.audit_stream_path, DEFAULT_AUDIT_STREAM_PATH);
+    await ledger.close();
     rmSync(DEFAULT_AUDIT_STREAM_PATH, { force: true });
   });
 });
@@ -29,17 +29,17 @@ describe("v0.1 contract constants", () => {
   });
 
   it("pins decision to allow", () => {
-    assert.equal(OBSERVER_DECISION, "allow");
+    assert.equal(LEDGER_DECISION, "allow");
   });
 
   it("pins decision_reason to observer_short_circuit", () => {
-    assert.equal(OBSERVER_DECISION_REASON, "observer_short_circuit");
+    assert.equal(LEDGER_DECISION_REASON, "observer_short_circuit");
   });
 
   it("pins the default audit-stream path", () => {
     assert.equal(
       DEFAULT_AUDIT_STREAM_PATH,
-      "./posteria-observer-audit.jsonl",
+      "./posteria-ledger-audit.jsonl",
     );
   });
 });
