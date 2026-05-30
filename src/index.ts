@@ -9,7 +9,7 @@ import { emitTelemetryNoop } from "./telemetry.js";
 
 export const RECORD_VERSION = "0.1.0" as const;
 export const LEDGER_DECISION = "allow" as const;
-export const LEDGER_DECISION_REASON = "observer_short_circuit" as const;
+export const LEDGER_DECISION_REASON = "ledger_short_circuit" as const;
 export const DEFAULT_AUDIT_STREAM_PATH =
   "./posteria-ledger-audit.jsonl" as const;
 
@@ -51,7 +51,7 @@ export interface AuditRecord {
   vdc: VdcEnvelope;
   decision: typeof LEDGER_DECISION;
   decision_reason: typeof LEDGER_DECISION_REASON;
-  observer_version: string;
+  ledger_version: string;
   host_metadata?: Record<string, unknown>;
   [extensionKey: `x-${string}-${string}`]: unknown;
 }
@@ -127,7 +127,7 @@ function copyExtensions(
   }
 }
 
-/** Walk up from this module to the package.json that owns it, for observer_version. */
+/** Walk up from this module to the package.json that owns it, for ledger_version. */
 function readLedgerVersion(): string {
   let dir = dirname(fileURLToPath(import.meta.url));
   for (let depth = 0; depth < 10; depth++) {
@@ -226,7 +226,7 @@ export function createLedger(
         vdc: normalizeVdc(action.vdc),
         decision: LEDGER_DECISION,
         decision_reason: LEDGER_DECISION_REASON,
-        observer_version: LEDGER_VERSION,
+        ledger_version: LEDGER_VERSION,
       };
       if (hasHostMetadata) record.host_metadata = resolved.host_metadata;
       copyExtensions(

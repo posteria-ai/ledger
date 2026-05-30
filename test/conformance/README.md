@@ -25,7 +25,7 @@ run separately from `npm test`: the unit-test glob
 `v0.1.conformance.ts` covers the six clauses:
 
 1. **Identity-function decision behavior** — every well-formed input returns
-   `allow` + `observer_short_circuit`, with zero caller-payload mutation, and
+   `allow` + `ledger_short_circuit`, with zero caller-payload mutation, and
    exactly N records recorded.
 2. **Audit-stream record shape** — every emitted record carries the required
    fields with pinned literals, a four-field `vdc` envelope (plus `x-*` only),
