@@ -24,8 +24,8 @@ describe("v0.1 contract type compatibility — positive cases", () => {
         claims: {},
       },
       decision: "allow",
-      decision_reason: "observer_short_circuit",
-      observer_version: "0.0.0",
+      decision_reason: "ledger_short_circuit",
+      ledger_version: "0.0.0",
     };
     void _record;
   });
@@ -39,8 +39,8 @@ describe("v0.1 contract type compatibility — positive cases", () => {
       action_signature: "sig",
       vdc: { mandate_id: null, issuer: null, subject: null, claims: {} },
       decision: "allow",
-      decision_reason: "observer_short_circuit",
-      observer_version: "0.0.0",
+      decision_reason: "ledger_short_circuit",
+      ledger_version: "0.0.0",
       host_metadata: { region: "us-east-1" },
     };
     void _record;
@@ -55,8 +55,8 @@ describe("v0.1 contract type compatibility — positive cases", () => {
       action_signature: "sig",
       vdc: { mandate_id: null, issuer: null, subject: null, claims: {} },
       decision: "allow",
-      decision_reason: "observer_short_circuit",
-      observer_version: "0.0.0",
+      decision_reason: "ledger_short_circuit",
+      ledger_version: "0.0.0",
       "x-acmeco-trace_id": "abc",
       "x-acmeco-correlation_id": 42,
     };
@@ -103,7 +103,7 @@ describe("v0.1 contract type compatibility — positive cases", () => {
   it("compiles a literal-typed LedgerDecision", () => {
     const _decision: LedgerDecision = {
       decision: "allow",
-      decision_reason: "observer_short_circuit",
+      decision_reason: "ledger_short_circuit",
     };
     void _decision;
   });
@@ -128,8 +128,8 @@ describe("v0.1 contract type compatibility — negative cases", () => {
       action_signature: "sig",
       vdc: { mandate_id: null, issuer: null, subject: null, claims: {} },
       decision: "allow",
-      decision_reason: "observer_short_circuit",
-      observer_version: "0.0.0",
+      decision_reason: "ledger_short_circuit",
+      ledger_version: "0.0.0",
       // @ts-expect-error posteria_* is reserved for v0.2+; v0.1 producer MUST NOT emit
       posteria_attestation: {},
     };
@@ -169,8 +169,8 @@ describe("v0.1 contract type compatibility — negative cases", () => {
       action_signature: "sig",
       vdc: { mandate_id: null, issuer: null, subject: null, claims: {} },
       decision: "allow",
-      decision_reason: "observer_short_circuit",
-      observer_version: "0.0.0",
+      decision_reason: "ledger_short_circuit",
+      ledger_version: "0.0.0",
       // @ts-expect-error non-namespaced extra fields are not part of the v0.1 contract
       arbitrary_field: "nope",
     };
@@ -193,7 +193,7 @@ describe("v0.1 contract type compatibility — negative cases", () => {
     const _bad: LedgerDecision = {
       // @ts-expect-error v0.1 emits only "allow"
       decision: "deny",
-      decision_reason: "observer_short_circuit",
+      decision_reason: "ledger_short_circuit",
     };
     void _bad;
   });
@@ -201,7 +201,7 @@ describe("v0.1 contract type compatibility — negative cases", () => {
   it("rejects literal mismatch on decision_reason", () => {
     const _bad: LedgerDecision = {
       decision: "allow",
-      // @ts-expect-error v0.1 emits only "observer_short_circuit"
+      // @ts-expect-error v0.1 emits only "ledger_short_circuit"
       decision_reason: "policy_match",
     };
     void _bad;
@@ -217,8 +217,8 @@ describe("v0.1 contract type compatibility — negative cases", () => {
       action_signature: "sig",
       vdc: { mandate_id: null, issuer: null, subject: null, claims: {} },
       decision: "allow",
-      decision_reason: "observer_short_circuit",
-      observer_version: "0.0.0",
+      decision_reason: "ledger_short_circuit",
+      ledger_version: "0.0.0",
     };
     void _bad;
   });

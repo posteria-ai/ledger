@@ -44,7 +44,7 @@ describe("record — decision", () => {
     const decision = ledger.record(action());
     assert.deepEqual(decision, {
       decision: "allow",
-      decision_reason: "observer_short_circuit",
+      decision_reason: "ledger_short_circuit",
     });
     await ledger.close();
   });
@@ -290,7 +290,7 @@ describe("reserved / unrecognized field guard", () => {
 });
 
 describe("record envelope", () => {
-  it("emits the pinned version/decision constants and a package-matching observer_version", async () => {
+  it("emits the pinned version/decision constants and a package-matching ledger_version", async () => {
     const { ledger, path } = newObserver();
     ledger.record(action());
     await ledger.close();
@@ -305,8 +305,8 @@ describe("record envelope", () => {
 
     assert.equal(rec!.record_version, "0.1.0");
     assert.equal(rec!.decision, "allow");
-    assert.equal(rec!.decision_reason, "observer_short_circuit");
-    assert.equal(rec!.observer_version, pkg.version);
+    assert.equal(rec!.decision_reason, "ledger_short_circuit");
+    assert.equal(rec!.ledger_version, pkg.version);
     assert.equal(rec!.action_kind, "tool_call");
     assert.equal(rec!.action_signature, "search(q)");
   });

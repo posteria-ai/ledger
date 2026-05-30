@@ -32,8 +32,8 @@ describe("v0.1 contract constants", () => {
     assert.equal(LEDGER_DECISION, "allow");
   });
 
-  it("pins decision_reason to observer_short_circuit", () => {
-    assert.equal(LEDGER_DECISION_REASON, "observer_short_circuit");
+  it("pins decision_reason to ledger_short_circuit", () => {
+    assert.equal(LEDGER_DECISION_REASON, "ledger_short_circuit");
   });
 
   it("pins the default audit-stream path", () => {
@@ -59,8 +59,8 @@ describe("x-<orgslug>-* extension namespace", () => {
         claims: {},
       },
       decision: "allow",
-      decision_reason: "observer_short_circuit",
-      observer_version: "0.0.0",
+      decision_reason: "ledger_short_circuit",
+      ledger_version: "0.0.0",
       "x-acmeco-trace_id": "abc123",
     };
     assert.equal(record["x-acmeco-trace_id"], "abc123");

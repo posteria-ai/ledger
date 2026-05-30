@@ -146,7 +146,7 @@ async function waitUntil(
 }
 
 describe("contract: identity-function decision behavior", () => {
-  it("returns allow + observer_short_circuit for every well-formed input, mutates no payload, and records exactly N", async () => {
+  it("returns allow + ledger_short_circuit for every well-formed input, mutates no payload, and records exactly N", async () => {
     const path = join(dir, "audit.jsonl");
     const ledger = createLedger({ audit_stream_path: path });
     const n = 1024;
@@ -168,7 +168,7 @@ describe("contract: identity-function decision behavior", () => {
       const decision = ledger.record(input);
       assert.deepEqual(decision, {
         decision: "allow",
-        decision_reason: "observer_short_circuit",
+        decision_reason: "ledger_short_circuit",
       });
       // Zero caller-payload mutation: the input is byte-identical to its clone.
       assert.deepEqual(input, clone);
@@ -189,7 +189,7 @@ describe("contract: audit-stream record shape", () => {
     "vdc",
     "decision",
     "decision_reason",
-    "observer_version",
+    "ledger_version",
   ] as const;
   const VDC_FIELDS = ["mandate_id", "issuer", "subject", "claims"] as const;
   // Every documented top-level record field. host_metadata is optional; any
@@ -247,7 +247,7 @@ describe("contract: audit-stream record shape", () => {
       }
       assert.equal(rec.record_version, "0.1.0");
       assert.equal(rec.decision, "allow");
-      assert.equal(rec.decision_reason, "observer_short_circuit");
+      assert.equal(rec.decision_reason, "ledger_short_circuit");
 
       // Semantic checks, not just presence: a constant id, a non-RFC3339
       // timestamp, or a non-string version must all fail here.
@@ -258,10 +258,10 @@ describe("contract: audit-stream record shape", () => {
         !Number.isNaN(Date.parse(rec.recorded_at as string)),
         "recorded_at parses as a date",
       );
-      assert.equal(typeof rec.observer_version, "string");
+      assert.equal(typeof rec.ledger_version, "string");
       assert.ok(
-        (rec.observer_version as string).length > 0,
-        "observer_version is non-empty",
+        (rec.ledger_version as string).length > 0,
+        "ledger_version is non-empty",
       );
 
       // The top-level record carries only documented fields plus x-*

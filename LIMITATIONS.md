@@ -75,6 +75,6 @@ satisfying a compliance obligation it has not demonstrably met.
 This package was previously named `@posteria/observer`. It was renamed to
 `@posteria/ledger` to make the scope honest: it produces an open, append-only
 **record** of boundary crossings — it is not an "observability" product. The
-v0.1 record-shape fields `observer_version` and the `decision_reason` value
-`"observer_short_circuit"` retain their original names for record-reader
-stability; everything else uses the `ledger` name.
+rename is complete across the package, API, configuration, and the v0.1 record
+shape — the audit fields are `ledger_version` and the `decision_reason` value
+`"ledger_short_circuit"`.

@@ -112,7 +112,7 @@ v0.1 will not be silently upgraded into a network-emitting build.
 If a future v0.2 enables non-no-op telemetry, the following fields are the
 *candidate* surface — documented now so users can audit it before opting in:
 
-- `observer_version` — the `@posteria/ledger` package version.
+- `ledger_version` — the `@posteria/ledger` package version.
 - `record_count_since_last_ping` — count of records written since the
   previous telemetry ping.
 - `host_metadata` — exactly the operator-supplied object from
@@ -145,21 +145,13 @@ Each record is a single JSON object with the following required fields:
 | `action_signature` | string | Stable normalized representation. MUST NOT contain user secrets. |
 | `vdc` | object | Advisory in v0.1. Four fields: `mandate_id`, `issuer`, `subject`, `claims`. |
 | `decision` | string | Always `"allow"` in v0.1. |
-| `decision_reason` | string | Always `"observer_short_circuit"` in v0.1. |
-| `observer_version` | string | Package version that wrote the record. |
+| `decision_reason` | string | Always `"ledger_short_circuit"` in v0.1. |
+| `ledger_version` | string | Package version that wrote the record. |
 | `host_metadata` | object (optional) | Per-installation labels. MUST NOT contain PII. |
 
 The full record-shape contract, including extension hooks, reserved
 namespaces, and producer/reader/validator role obligations, ships with the
 v0.1.0 release.
-
-> **Note on the `observer_*` record fields.** The wire field `observer_version`
-> and the `decision_reason` value `"observer_short_circuit"` retain their
-> original names from when this package was `@posteria/observer`. They are
-> stable v0.1 record-shape fields governed by the canonical contract and are
-> kept byte-stable here so existing record readers do not break. The package,
-> API, and configuration use the `ledger` name; the v0.1 wire format does not
-> rename these two fields.
 
 ### Reserved fields
 
