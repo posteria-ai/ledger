@@ -60,11 +60,14 @@ For the explicit non-claims list, see `LIMITATIONS.md`.
 
 ## Install
 
+> **Not yet published.** `@posteria/ledger` is pre-v0.1.0 and not on npm yet
+> (`package.json` is still `private`). Once v0.1.0 ships:
+
 ```sh
 npm install @posteria/ledger
 ```
 
-Published under the `@posteria` npm scope. Runtime targets Node.js 20+ LTS,
+Will publish under the `@posteria` npm scope. Runtime targets Node.js 20+ LTS,
 ESM-only. Browser / edge runtimes are out of scope for v0.1.
 
 ## Configuration
