@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { createObserver, type AuditAction } from "../../src/index.js";
+import { createLedger, type AuditAction } from "../../src/index.js";
 
 const action = (): AuditAction => ({
   action_kind: "tool_call",
@@ -10,14 +10,14 @@ const action = (): AuditAction => ({
 });
 
 async function runRealTelemetryNoop(): Promise<void> {
-  const dir = mkdtempSync(join(tmpdir(), "posteria-observer-network-deny-"));
+  const dir = mkdtempSync(join(tmpdir(), "posteria-ledger-network-deny-"));
   try {
-    const observer = createObserver({
+    const ledger = createLedger({
       audit_stream_path: join(dir, "audit.jsonl"),
       enable_anon_telemetry: true,
     });
-    for (let i = 0; i < 50; i++) observer.observe(action());
-    await observer.close();
+    for (let i = 0; i < 50; i++) ledger.record(action());
+    await ledger.close();
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

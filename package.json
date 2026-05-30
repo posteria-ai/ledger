@@ -1,7 +1,7 @@
 {
-  "name": "@posteria/observer",
+  "name": "@posteria/ledger",
   "version": "0.0.0",
-  "description": "Identity-function boundary observer for AI agents.",
+  "description": "Open, append-only record of what crosses an AI agent's I/O boundary.",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -11,6 +11,7 @@
   "files": [
     "dist",
     "README.md",
+    "LIMITATIONS.md",
     "LICENSE"
   ],
   "exports": {

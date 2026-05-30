@@ -5,12 +5,12 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
-import { createObserver, type AuditAction } from "../src/index.js";
+import { createLedger, type AuditAction } from "../src/index.js";
 
 let dir: string;
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), "posteria-observer-"));
+  dir = mkdtempSync(join(tmpdir(), "posteria-ledger-"));
 });
 
 afterEach(() => {
@@ -19,7 +19,7 @@ afterEach(() => {
 
 function newObserver() {
   const path = join(dir, "audit.jsonl");
-  return { observer: createObserver({ audit_stream_path: path }), path };
+  return { ledger: createLedger({ audit_stream_path: path }), path };
 }
 
 function readRecords(path: string): Record<string, unknown>[] {
@@ -38,21 +38,21 @@ const action = (overrides: Partial<AuditAction> = {}): AuditAction => ({
   ...overrides,
 });
 
-describe("observe — decision", () => {
+describe("record — decision", () => {
   it("returns exactly the short-circuit decision, synchronously", async () => {
-    const { observer } = newObserver();
-    const decision = observer.observe(action());
+    const { ledger } = newObserver();
+    const decision = ledger.record(action());
     assert.deepEqual(decision, {
       decision: "allow",
       decision_reason: "observer_short_circuit",
     });
-    await observer.close();
+    await ledger.close();
   });
 });
 
-describe("observe — no payload mutation", () => {
+describe("record — no payload mutation", () => {
   it("does not mutate the caller-supplied action", async () => {
-    const { observer } = newObserver();
+    const { ledger } = newObserver();
     const claims = { role: "admin" };
     const input: AuditAction = {
       action_kind: "tool_call",
@@ -60,30 +60,30 @@ describe("observe — no payload mutation", () => {
       vdc: { mandate_id: "m-1", issuer: "iss", subject: "sub", claims },
     };
     const snapshot = structuredClone(input);
-    observer.observe(input);
+    ledger.record(input);
     assert.deepEqual(input, snapshot);
-    await observer.close();
+    await ledger.close();
   });
 });
 
-describe("observe — one record per call", () => {
-  it("writes exactly one record per observe()", async () => {
-    const { observer, path } = newObserver();
+describe("record — one record per call", () => {
+  it("writes exactly one record per record()", async () => {
+    const { ledger, path } = newObserver();
     const n = 25;
-    for (let i = 0; i < n; i++) observer.observe(action());
-    await observer.close();
+    for (let i = 0; i < n; i++) ledger.record(action());
+    await ledger.close();
     assert.equal(readRecords(path).length, n);
   });
 });
 
 describe("VDC normalization", () => {
   it("passes all four supplied fields through, reference-preserving claims", async () => {
-    const { observer, path } = newObserver();
+    const { ledger, path } = newObserver();
     const claims = { role: "admin", scopes: ["read"] };
-    observer.observe(
+    ledger.record(
       action({ vdc: { mandate_id: "m-1", issuer: "iss", subject: "sub", claims } }),
     );
-    await observer.close();
+    await ledger.close();
     const [rec] = readRecords(path);
     assert.deepEqual(rec!.vdc, {
       mandate_id: "m-1",
@@ -94,9 +94,9 @@ describe("VDC normalization", () => {
   });
 
   it("defaults all four fields when no vdc is supplied", async () => {
-    const { observer, path } = newObserver();
-    observer.observe(action());
-    await observer.close();
+    const { ledger, path } = newObserver();
+    ledger.record(action());
+    await ledger.close();
     const [rec] = readRecords(path);
     assert.deepEqual(rec!.vdc, {
       mandate_id: null,
@@ -107,9 +107,9 @@ describe("VDC normalization", () => {
   });
 
   it("defaults the missing fields when only mandate_id is supplied", async () => {
-    const { observer, path } = newObserver();
-    observer.observe(action({ vdc: { mandate_id: "only-this" } }));
-    await observer.close();
+    const { ledger, path } = newObserver();
+    ledger.record(action({ vdc: { mandate_id: "only-this" } }));
+    await ledger.close();
     const [rec] = readRecords(path);
     assert.deepEqual(rec!.vdc, {
       mandate_id: "only-this",
@@ -122,19 +122,19 @@ describe("VDC normalization", () => {
 
 describe("namespaced extension pass-through", () => {
   it("copies x-<orgslug>-* fields from the action to the record top level", async () => {
-    const { observer, path } = newObserver();
-    observer.observe(action({ "x-acmeco-trace_id": "abc123" }));
-    await observer.close();
+    const { ledger, path } = newObserver();
+    ledger.record(action({ "x-acmeco-trace_id": "abc123" }));
+    await ledger.close();
     const [rec] = readRecords(path);
     assert.equal(rec!["x-acmeco-trace_id"], "abc123");
   });
 
   it("copies x-<orgslug>-* fields from the supplied vdc into the envelope", async () => {
-    const { observer, path } = newObserver();
-    observer.observe(
+    const { ledger, path } = newObserver();
+    ledger.record(
       action({ vdc: { mandate_id: "m-1", "x-acmeco-purpose": "audit" } }),
     );
-    await observer.close();
+    await ledger.close();
     const [rec] = readRecords(path);
     assert.deepEqual(rec!.vdc, {
       mandate_id: "m-1",
@@ -174,73 +174,73 @@ describe("reserved / unrecognized field guard", () => {
 
   for (const field of RESERVED_TOP_LEVEL) {
     it(`throws and emits no record for reserved top-level field ${field}`, async () => {
-      const { observer, path } = newObserver();
+      const { ledger, path } = newObserver();
       assert.throws(
-        () => observer.observe({ ...action(), [field]: {} } as AuditAction),
+        () => ledger.record({ ...action(), [field]: {} } as AuditAction),
         /non-v0.1 field/,
       );
-      await observer.close();
+      await ledger.close();
       assert.equal(recordCount(path), 0);
     });
   }
 
   for (const field of RESERVED_VDC) {
     it(`throws and emits no record for reserved vdc field ${field}`, async () => {
-      const { observer, path } = newObserver();
+      const { ledger, path } = newObserver();
       assert.throws(
         () =>
-          observer.observe(
+          ledger.record(
             action({ vdc: { mandate_id: "m", [field]: {} } } as Partial<AuditAction>),
           ),
         /non-v0.1 field/,
       );
-      await observer.close();
+      await ledger.close();
       assert.equal(recordCount(path), 0);
     });
   }
 
   it("throws for an unrecognized non-namespaced top-level field", async () => {
-    const { observer, path } = newObserver();
+    const { ledger, path } = newObserver();
     assert.throws(
-      () => observer.observe({ ...action(), arbitrary_key: "nope" } as AuditAction),
+      () => ledger.record({ ...action(), arbitrary_key: "nope" } as AuditAction),
       /non-v0.1 field/,
     );
-    await observer.close();
+    await ledger.close();
     assert.equal(recordCount(path), 0);
   });
 
   it("throws for a malformed pseudo-namespace (x-acmeco with no suffix)", async () => {
-    const { observer, path } = newObserver();
+    const { ledger, path } = newObserver();
     assert.throws(
-      () => observer.observe({ ...action(), "x-acmeco": "no-suffix" } as AuditAction),
+      () => ledger.record({ ...action(), "x-acmeco": "no-suffix" } as AuditAction),
       /non-v0.1 field/,
     );
-    await observer.close();
+    await ledger.close();
     assert.equal(recordCount(path), 0);
   });
 
   it("throws for an unrecognized non-namespaced field inside vdc", async () => {
-    const { observer, path } = newObserver();
+    const { ledger, path } = newObserver();
     assert.throws(
       () =>
-        observer.observe(
+        ledger.record(
           action({ vdc: { mandate_id: "m", arbitrary_key: "nope" } } as Partial<AuditAction>),
         ),
       /non-v0.1 field/,
     );
-    await observer.close();
+    await ledger.close();
     assert.equal(recordCount(path), 0);
   });
 
   it("accepts valid x-<orgslug>-* extensions at top level and in vdc (positive control)", async () => {
-    const { observer, path } = newObserver();
-    observer.observe(
+    const { ledger, path } = newObserver();
+    ledger.record(
       action({
         "x-acmeco-trace_id": "abc",
         vdc: { mandate_id: "m", "x-acmeco-purpose": "audit" },
       }),
     );
-    await observer.close();
+    await ledger.close();
     const [rec] = readRecords(path);
     assert.equal(rec!["x-acmeco-trace_id"], "abc");
     assert.equal((rec!.vdc as Record<string, unknown>)["x-acmeco-purpose"], "audit");
@@ -260,10 +260,10 @@ describe("reserved / unrecognized field guard", () => {
       }
     }
 
-    const { observer, path } = newObserver();
+    const { ledger, path } = newObserver();
     const n = 1024;
     for (let i = 0; i < n; i++) {
-      observer.observe(
+      ledger.record(
         action({
           action_signature: `search(q${i})`,
           "x-acmeco-trace_id": `t-${i}`,
@@ -277,7 +277,7 @@ describe("reserved / unrecognized field guard", () => {
         }),
       );
     }
-    await observer.close();
+    await ledger.close();
 
     const records = readRecords(path);
     assert.equal(records.length, n);
@@ -291,9 +291,9 @@ describe("reserved / unrecognized field guard", () => {
 
 describe("record envelope", () => {
   it("emits the pinned version/decision constants and a package-matching observer_version", async () => {
-    const { observer, path } = newObserver();
-    observer.observe(action());
-    await observer.close();
+    const { ledger, path } = newObserver();
+    ledger.record(action());
+    await ledger.close();
     const [rec] = readRecords(path);
 
     const pkg = JSON.parse(
@@ -312,19 +312,19 @@ describe("record envelope", () => {
   });
 
   it("produces unique record_ids across many calls", async () => {
-    const { observer, path } = newObserver();
+    const { ledger, path } = newObserver();
     const n = 10_000;
-    for (let i = 0; i < n; i++) observer.observe(action());
-    await observer.close();
+    for (let i = 0; i < n; i++) ledger.record(action());
+    await ledger.close();
     const ids = readRecords(path).map((r) => r.record_id);
     assert.equal(new Set(ids).size, n);
   });
 
   it("stamps recorded_at as RFC 3339 within ±1s of now", async () => {
-    const { observer, path } = newObserver();
+    const { ledger, path } = newObserver();
     const before = Date.now();
-    observer.observe(action());
-    await observer.close();
+    ledger.record(action());
+    await ledger.close();
     const [rec] = readRecords(path);
     const ts = Date.parse(rec!.recorded_at as string);
     assert.ok(!Number.isNaN(ts), "recorded_at must parse as a date");
@@ -334,19 +334,19 @@ describe("record envelope", () => {
 
 describe("close semantics", () => {
   it("after close() resolves, exactly N records are durable", async () => {
-    const { observer, path } = newObserver();
+    const { ledger, path } = newObserver();
     const n = 500;
-    for (let i = 0; i < n; i++) observer.observe(action());
-    await observer.close();
+    for (let i = 0; i < n; i++) ledger.record(action());
+    await ledger.close();
     assert.equal(readRecords(path).length, n);
   });
 
   it("close() is idempotent and the second call resolves promptly", async () => {
-    const { observer } = newObserver();
-    observer.observe(action());
-    await observer.close();
+    const { ledger } = newObserver();
+    ledger.record(action());
+    await ledger.close();
     const start = process.hrtime.bigint();
-    await observer.close();
+    await ledger.close();
     const elapsedMs = Number(process.hrtime.bigint() - start) / 1e6;
     assert.ok(elapsedMs < 5, `second close took ${elapsedMs}ms`);
   });
@@ -354,31 +354,31 @@ describe("close semantics", () => {
 
 describe("config", () => {
   it("is read-only — mutation throws and the value is unchanged", async () => {
-    const { observer, path } = newObserver();
+    const { ledger, path } = newObserver();
     assert.throws(() => {
-      (observer.config as { audit_stream_path: string }).audit_stream_path =
+      (ledger.config as { audit_stream_path: string }).audit_stream_path =
         "/tmp/other";
     });
-    assert.equal(observer.config.audit_stream_path, path);
-    await observer.close();
+    assert.equal(ledger.config.audit_stream_path, path);
+    await ledger.close();
   });
 
   it("includes host_metadata in the record when configured", async () => {
     const path = join(dir, "audit.jsonl");
-    const observer = createObserver({
+    const ledger = createLedger({
       audit_stream_path: path,
       host_metadata: { region: "us-east-1" },
     });
-    observer.observe(action());
-    await observer.close();
+    ledger.record(action());
+    await ledger.close();
     const [rec] = readRecords(path);
     assert.deepEqual(rec!.host_metadata, { region: "us-east-1" });
   });
 
   it("omits host_metadata from the record when it is empty (default)", async () => {
-    const { observer, path } = newObserver();
-    observer.observe(action());
-    await observer.close();
+    const { ledger, path } = newObserver();
+    ledger.record(action());
+    await ledger.close();
     const [rec] = readRecords(path);
     assert.equal("host_metadata" in rec!, false);
   });

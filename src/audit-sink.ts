@@ -98,7 +98,7 @@ class JsonlAuditSink implements AuditSink {
       stat = statSync(dir);
     } catch {
       throw new Error(
-        `audit sink parent directory does not exist: ${dir} (Observer does not auto-create directories)`,
+        `audit sink parent directory does not exist: ${dir} (Ledger does not auto-create directories)`,
       );
     }
     if (!stat.isDirectory()) {

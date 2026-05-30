@@ -1,11 +1,11 @@
 # Conformance Suite
 
 This directory holds the v0.1 conformance acceptance suite for
-`@posteria/observer`. The suite has landed.
+`@posteria/ledger`. The suite has landed.
 
 It is the canonical validator of the producer-side obligations in
 `docs/contract/v0.1.md` (and
-`specs/007-observer-mode-and-positioning/contracts/observer-api.md`
+`specs/007-ledger-mode-and-positioning/contracts/ledger-api.md`
 §"Conformance Test Expectations"). Each contract clause maps to one named
 test, so a failing test name states the violated clause directly.
 
@@ -33,7 +33,7 @@ run separately from `npm test`: the unit-test glob
 3. **Producer-side reserved/unrecognized-field rejection** — each reserved
    `posteria_*` top-level field, each reserved `vdc.*` field, any unrecognized
    non-namespaced field (top level or `vdc`), and a malformed pseudo-namespace
-   (`x-acmeco` with no suffix) all make `observe()` throw and emit no record; a
+   (`x-acmeco` with no suffix) all make `record()` throw and emit no record; a
    valid `x-<orgslug>-*` extension is accepted (positive control).
 4. **Telemetry-stub no-op** — with `enable_anon_telemetry: true` and the real
    stub, no network primitive is invoked, including DNS named imports captured

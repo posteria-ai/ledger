@@ -24,7 +24,7 @@ describe("resolveConfig — defaults", () => {
 describe("resolveConfig — precedence (later wins)", () => {
   it("uses env when no programmatic value is given", () => {
     const config = resolveConfig({
-      env: { POSTERIA_OBSERVER_AUDIT_STREAM_PATH: "/tmp/from-env" },
+      env: { POSTERIA_LEDGER_AUDIT_STREAM_PATH: "/tmp/from-env" },
       argv: [],
       warn: silent,
     });
@@ -34,7 +34,7 @@ describe("resolveConfig — precedence (later wins)", () => {
   it("env overrides programmatic", () => {
     const config = resolveConfig({
       programmatic: { audit_stream_path: "/tmp/a" },
-      env: { POSTERIA_OBSERVER_AUDIT_STREAM_PATH: "/tmp/b" },
+      env: { POSTERIA_LEDGER_AUDIT_STREAM_PATH: "/tmp/b" },
       argv: [],
       warn: silent,
     });
@@ -44,7 +44,7 @@ describe("resolveConfig — precedence (later wins)", () => {
   it("CLI overrides env", () => {
     const config = resolveConfig({
       programmatic: { audit_stream_path: "/tmp/a" },
-      env: { POSTERIA_OBSERVER_AUDIT_STREAM_PATH: "/tmp/b" },
+      env: { POSTERIA_LEDGER_AUDIT_STREAM_PATH: "/tmp/b" },
       argv: ["--audit-stream-path=/tmp/c"],
       warn: silent,
     });
@@ -64,7 +64,7 @@ describe("resolveConfig — precedence (later wins)", () => {
 describe("resolveConfig — typed env parsing", () => {
   it("parses boolean env true case-insensitively", () => {
     const config = resolveConfig({
-      env: { POSTERIA_OBSERVER_ENABLE_ANON_TELEMETRY: "TRUE" },
+      env: { POSTERIA_LEDGER_ENABLE_ANON_TELEMETRY: "TRUE" },
       argv: [],
       warn: silent,
     });
@@ -73,7 +73,7 @@ describe("resolveConfig — typed env parsing", () => {
 
   it("parses boolean env false", () => {
     const config = resolveConfig({
-      env: { POSTERIA_OBSERVER_ENABLE_ANON_TELEMETRY: "false" },
+      env: { POSTERIA_LEDGER_ENABLE_ANON_TELEMETRY: "false" },
       argv: [],
       warn: silent,
     });
@@ -82,7 +82,7 @@ describe("resolveConfig — typed env parsing", () => {
 
   it("parses object env as JSON", () => {
     const config = resolveConfig({
-      env: { POSTERIA_OBSERVER_HOST_METADATA: '{"region":"us-east-1"}' },
+      env: { POSTERIA_LEDGER_HOST_METADATA: '{"region":"us-east-1"}' },
       argv: [],
       warn: silent,
     });
@@ -92,7 +92,7 @@ describe("resolveConfig — typed env parsing", () => {
   it("warns and ignores an invalid boolean env value", () => {
     const warnings: string[] = [];
     const config = resolveConfig({
-      env: { POSTERIA_OBSERVER_ENABLE_ANON_TELEMETRY: "yes" },
+      env: { POSTERIA_LEDGER_ENABLE_ANON_TELEMETRY: "yes" },
       argv: [],
       warn: (m) => warnings.push(m),
     });
@@ -103,7 +103,7 @@ describe("resolveConfig — typed env parsing", () => {
   it("warns and ignores invalid JSON for an object env value", () => {
     const warnings: string[] = [];
     const config = resolveConfig({
-      env: { POSTERIA_OBSERVER_HOST_METADATA: "{not json}" },
+      env: { POSTERIA_LEDGER_HOST_METADATA: "{not json}" },
       argv: [],
       warn: (m) => warnings.push(m),
     });
@@ -134,14 +134,14 @@ describe("resolveConfig — unknown keys", () => {
     assert.equal(config.audit_stream_path, DEFAULT_AUDIT_STREAM_PATH);
   });
 
-  it("warns on an unknown POSTERIA_OBSERVER_* env key", () => {
+  it("warns on an unknown POSTERIA_LEDGER_* env key", () => {
     const warnings: string[] = [];
     resolveConfig({
-      env: { POSTERIA_OBSERVER_BOGUS: "x" },
+      env: { POSTERIA_LEDGER_BOGUS: "x" },
       argv: [],
       warn: (m) => warnings.push(m),
     });
-    assert.ok(warnings.some((m) => m.includes("POSTERIA_OBSERVER_BOGUS")));
+    assert.ok(warnings.some((m) => m.includes("POSTERIA_LEDGER_BOGUS")));
   });
 
   it("does not warn on unrelated env vars", () => {
