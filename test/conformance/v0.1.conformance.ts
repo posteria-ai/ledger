@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import dgram from "node:dgram";
 import dns from "node:dns";
 import {
@@ -14,7 +15,8 @@ import http2 from "node:http2";
 import https from "node:https";
 import net from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import tls from "node:tls";
 import { afterEach, beforeEach, describe, it, mock } from "node:test";
 
@@ -82,6 +84,46 @@ function assertNoRecordEmitted(path: string): void {
     0,
     `expected no audit output, but the file is non-empty: ${JSON.stringify(raw.slice(0, 200))}`,
   );
+}
+
+function runNetworkDenyChild(mode: string): {
+  status: number | null;
+  stderr: string;
+  stdout: string;
+} {
+  const compiledDir = dirname(fileURLToPath(import.meta.url));
+  const childPath = join(compiledDir, "telemetry-network-deny-child.js");
+  // The preload stays as source .cjs so Node can load it before compiled ESM.
+  // Resolve it from this compiled conformance file, not the caller's cwd.
+  const preloadPath = join(
+    compiledDir,
+    "../../../test/conformance/network-deny-preload.cjs",
+  );
+  assert.ok(
+    existsSync(preloadPath),
+    `network-deny preload not found at ${preloadPath}`,
+  );
+
+  return spawnSync(
+    process.execPath,
+    ["--require", preloadPath, childPath, mode],
+    { encoding: "utf8" },
+  );
+}
+
+function assertDnsPromisesResolveBlocked(result: {
+  status: number | null;
+  stderr: string;
+  stdout: string;
+}): void {
+  // Assert the stable primitive label, not the preload's diagnostic sentence.
+  // This keeps negative controls from depending on stderr wording.
+  assert.equal(
+    result.status,
+    1,
+    `network-deny negative control did not fail as expected\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
+  );
+  assert.match(result.stderr, /\bdns\.promises\.resolve\b/);
 }
 
 // RFC 3339 / ISO 8601 instant, e.g. 2026-05-28T12:34:56.789Z.
@@ -379,7 +421,29 @@ describe("contract: producer-side reserved/unrecognized-field rejection", () => 
 });
 
 describe("contract: telemetry-stub no-op", () => {
+  it("network-deny subprocess catches DNS named imports captured before test module load", () => {
+    const result = runNetworkDenyChild("captured-dns-negative-control");
+
+    assertDnsPromisesResolveBlocked(result);
+  });
+
+  it("network-deny subprocess fails even when a blocked DNS named import is swallowed", () => {
+    const result = runNetworkDenyChild(
+      "swallowed-captured-dns-negative-control",
+    );
+
+    assertDnsPromisesResolveBlocked(result);
+  });
+
   it("opens no socket and issues no DNS/HTTP/HTTPS/HTTP2/UDP/TLS/fetch traffic with the real stub even when enable_anon_telemetry is true", async () => {
+    const result = runNetworkDenyChild("real-telemetry-noop");
+
+    assert.equal(
+      result.status,
+      0,
+      `telemetry no-op subprocess failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
+    );
+
     // Spy the full surface a telemetry implementation could plausibly use, plus
     // the low-level Socket.prototype.connect that every TCP path funnels
     // through — so a stub that bypasses the high-level aliases is still caught.
@@ -421,6 +485,10 @@ describe("contract: telemetry-stub no-op", () => {
       }
     };
 
+    // Keep this network-primitive inventory in sync with
+    // network-deny-preload.cjs. The duplication is intentional: the preload
+    // catches bindings captured before this test module loads, while this
+    // in-process spy preserves call-count assertions for the live object path.
     spy(net.Socket.prototype, "connect", "net.Socket#connect");
     spy(net, "createConnection");
     spy(net, "connect", "net.connect");
