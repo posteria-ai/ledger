@@ -1,9 +1,16 @@
 {
   "name": "@posteria/ledger",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Open, append-only record of what crosses an AI agent's I/O boundary.",
-  "private": true,
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/posteria-ai/ledger.git"
+  },
+  "homepage": "https://github.com/posteria-ai/ledger#readme",
+  "bugs": {
+    "url": "https://github.com/posteria-ai/ledger/issues"
+  },
   "type": "module",
   "engines": {
     "node": ">=20"

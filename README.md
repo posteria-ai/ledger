@@ -14,7 +14,7 @@ engine builds enforcement and attestation on top of. If you want detection,
 analytics, or alerting, use a monitoring tool; Ledger is the record, not the
 monitor.
 
-**Status:** pre-v0.1.0. Runtime ships with v0.1.0.
+**Status:** v0.1.0.
 
 **License:** MIT.
 
@@ -60,14 +60,11 @@ For the explicit non-claims list, see `LIMITATIONS.md`.
 
 ## Install
 
-> **Not yet published.** `@posteria/ledger` is pre-v0.1.0 and not on npm yet
-> (`package.json` is still `private`). Once v0.1.0 ships:
-
 ```sh
 npm install @posteria/ledger
 ```
 
-Will publish under the `@posteria` npm scope. Runtime targets Node.js 20+ LTS,
+Published under the `@posteria` npm scope. Runtime targets Node.js 20+ LTS,
 ESM-only. Browser / edge runtimes are out of scope for v0.1.
 
 ## Configuration
