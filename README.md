@@ -42,7 +42,8 @@ consumes — without requiring that engine. Three roles:
 
 ## What Ledger is not
 
-Ledger is deliberately not a policy engine, and not an observability product. It does not:
+Ledger is deliberately not a policy engine, and not an observability product.
+It does not:
 
 - Evaluate constitutions, mandates, or rules.
 - Block, refuse, redact, or modify calls.
@@ -67,6 +68,177 @@ npm install @posteria/ledger
 Published under the `@posteria` npm scope. Runtime targets Node.js 20+ LTS,
 ESM-only. Browser / edge runtimes are out of scope for v0.1.
 
+## Quick start
+
+The default configuration writes to `./posteria-ledger-audit.jsonl`, whose
+parent directory is the current working directory and already exists in a
+normal project.
+
+```ts
+import {
+  createLedger,
+  type AuditAction,
+  type LedgerDecision,
+} from "@posteria/ledger";
+
+const ledger = createLedger();
+
+const action: AuditAction = {
+  action_kind: "tool_call",
+  action_signature: "tool:get_weather(location_type)",
+  vdc: {
+    mandate_id: "support-agent-v1",
+    issuer: "posteria-demo",
+    subject: "weather-tool",
+    claims: {
+      tool_name: "get_weather",
+      location_type: "city",
+    },
+  },
+};
+
+const decision: LedgerDecision = ledger.record(action);
+console.log(decision);
+
+await ledger.close();
+
+/*
+Expected decision:
+{ decision: "allow", decision_reason: "ledger_short_circuit" }
+
+Example posteria-ledger-audit.jsonl line:
+{"record_version":"0.1.0","record_id":"7f9d0f35-1a1c-4ef4-97e4-0f4b2b7e8f54","recorded_at":"2026-06-04T18:24:11.000Z","action_kind":"tool_call","action_signature":"tool:get_weather(location_type)","vdc":{"mandate_id":"support-agent-v1","issuer":"posteria-demo","subject":"weather-tool","claims":{"tool_name":"get_weather","location_type":"city"}},"decision":"allow","decision_reason":"ledger_short_circuit","ledger_version":"0.1.1"}
+*/
+```
+
+For JavaScript-only projects, omit the type imports:
+
+```js
+import { createLedger } from "@posteria/ledger";
+
+const ledger = createLedger();
+
+const decision = ledger.record({
+  action_kind: "tool_call",
+  action_signature: "tool:send_support_reply(template_id)",
+  vdc: {
+    mandate_id: "support-agent-v1",
+    issuer: "posteria-demo",
+    subject: "support-reply-tool",
+    claims: {
+      tool_name: "send_support_reply",
+      template_id: "shipping-delay",
+    },
+  },
+});
+
+console.log(decision);
+await ledger.close();
+```
+
+`action_signature` must be a stable, normalized representation of the action
+and must not contain user secrets. `record()` accepts only documented v0.1
+fields plus `x-<orgslug>-*` extensions; if callers build action descriptors
+from untrusted input, wrap `record()` because reserved or unrecognized
+non-namespaced fields throw and emit no audit record.
+
+Ledger is meant to sit at the call boundary. In practice, record the boundary
+event next to the observed tool or model call, not in a separate background
+path.
+
+```js
+import { mkdir } from "node:fs/promises";
+
+import { createLedger } from "@posteria/ledger";
+
+await mkdir("./audit", { recursive: true });
+
+const ledger = createLedger({
+  audit_stream_path: "./audit/tool-boundary.jsonl",
+});
+
+async function callShippingTool({ orderId, destinationRegion }) {
+  return {
+    orderId,
+    destinationRegion,
+    etaDays: 3,
+  };
+}
+
+try {
+  ledger.record({
+    action_kind: "tool_call",
+    action_signature: "tool:get_shipping_eta(destination_region)",
+    vdc: {
+      mandate_id: "support-agent-v1",
+      issuer: "posteria-demo",
+      subject: "shipping-tool",
+      claims: {
+        tool_name: "get_shipping_eta",
+        destination_region: "us-midwest",
+      },
+    },
+  });
+
+  const result = await callShippingTool({
+    orderId: "order-123",
+    destinationRegion: "us-midwest",
+  });
+  console.log(result);
+} finally {
+  await ledger.close();
+}
+```
+
+Call `close()` during graceful shutdown so queued fire-and-forget records are
+flushed and fsynced before the process exits.
+
+```js
+import { mkdir } from "node:fs/promises";
+
+import { createLedger } from "@posteria/ledger";
+
+await mkdir("./audit", { recursive: true });
+
+const ledger = createLedger({
+  audit_stream_path: "./audit/shutdown.jsonl",
+});
+
+const keepAlive = setInterval(() => {}, 1000);
+let closing = false;
+
+async function shutdown() {
+  if (closing) return;
+  closing = true;
+  clearInterval(keepAlive);
+  await ledger.close();
+}
+
+process.once("SIGINT", () => {
+  void shutdown();
+});
+process.once("SIGTERM", () => {
+  void shutdown();
+});
+process.once("beforeExit", () => {
+  void shutdown();
+});
+
+ledger.record({
+  action_kind: "tool_call",
+  action_signature: "tool:prepare_invoice(invoice_shape)",
+  vdc: {
+    mandate_id: "billing-agent-v1",
+    issuer: "posteria-demo",
+    subject: "invoice-tool",
+    claims: {
+      tool_name: "prepare_invoice",
+      invoice_shape: "summary",
+    },
+  },
+});
+```
+
 ## Configuration
 
 Configuration precedence (later wins):
@@ -75,14 +247,96 @@ Configuration precedence (later wins):
 2. Environment variables prefixed `POSTERIA_LEDGER_*`.
 3. CLI flags (CLI use).
 
+<!-- markdownlint-disable MD013 -->
+
 | Knob | Type | Default | Notes |
 | --- | --- | --- | --- |
 | `audit_stream_path` | string (path) | `./posteria-ledger-audit.jsonl` | Local append-only file. Parent directory must exist; Ledger does NOT auto-create. |
 | `enable_anon_telemetry` | boolean | `false` | When `true`, engages the no-op telemetry stub (see below). |
 | `host_metadata` | object | `{}` | Optional per-installation labels. |
 
+<!-- markdownlint-enable MD013 -->
+
 Unknown configuration keys produce a startup warning but do not prevent
 startup.
+
+Programmatic configuration can customize all three knobs:
+
+```js
+import { mkdir } from "node:fs/promises";
+
+import { createLedger } from "@posteria/ledger";
+
+await mkdir("./audit", { recursive: true });
+
+const ledger = createLedger({
+  audit_stream_path: "./audit/programmatic.jsonl",
+  enable_anon_telemetry: true,
+  host_metadata: {
+    service: "support-agent",
+    environment: "development",
+  },
+});
+
+ledger.record({
+  action_kind: "tool_call",
+  action_signature: "tool:classify_ticket(ticket_shape)",
+  vdc: {
+    mandate_id: "support-agent-v1",
+    issuer: "posteria-demo",
+    subject: "classifier-tool",
+    claims: {
+      tool_name: "classify_ticket",
+      ticket_shape: "subject_and_priority",
+    },
+  },
+});
+
+await ledger.close();
+```
+
+`enable_anon_telemetry: true` is a no-op in v0.1. It transmits nothing today;
+the flag only exposes the future opt-in surface.
+
+The same knobs can be set through `POSTERIA_LEDGER_*` environment variables:
+
+```js
+import { mkdir } from "node:fs/promises";
+import { dirname } from "node:path";
+
+import { createLedger } from "@posteria/ledger";
+
+const auditPath =
+  process.env.POSTERIA_LEDGER_AUDIT_STREAM_PATH ??
+  "./posteria-ledger-audit.jsonl";
+
+await mkdir(dirname(auditPath), { recursive: true });
+
+const ledger = createLedger();
+
+ledger.record({
+  action_kind: "tool_call",
+  action_signature: "tool:route_ticket(queue_shape)",
+  vdc: {
+    mandate_id: "support-agent-v1",
+    issuer: "posteria-demo",
+    subject: "router-tool",
+    claims: {
+      tool_name: "route_ticket",
+      queue_shape: "region_and_priority",
+    },
+  },
+});
+
+await ledger.close();
+```
+
+```sh
+POSTERIA_LEDGER_AUDIT_STREAM_PATH=./audit/from-env.jsonl \
+POSTERIA_LEDGER_ENABLE_ANON_TELEMETRY=true \
+POSTERIA_LEDGER_HOST_METADATA='{"service":"support","env":"dev"}' \
+node configured-from-env.js
+```
 
 ## Telemetry
 
@@ -133,6 +387,8 @@ addition requires a spec amendment.
 
 Each record is a single JSON object with the following required fields:
 
+<!-- markdownlint-disable MD013 -->
+
 | Field | Type | Notes |
 | --- | --- | --- |
 | `record_version` | string | Strict SemVer. v0.1 emits `"0.1.0"`. |
@@ -145,6 +401,8 @@ Each record is a single JSON object with the following required fields:
 | `decision_reason` | string | Always `"ledger_short_circuit"` in v0.1. |
 | `ledger_version` | string | Package version that wrote the record. |
 | `host_metadata` | object (optional) | Per-installation labels. MUST NOT contain PII. |
+
+<!-- markdownlint-enable MD013 -->
 
 The full record-shape contract, including extension hooks, reserved
 namespaces, and producer/reader/validator role obligations, ships with the
