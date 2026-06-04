@@ -107,6 +107,7 @@ Expected decision:
 { decision: "allow", decision_reason: "ledger_short_circuit" }
 
 Example posteria-ledger-audit.jsonl line:
+record_id and recorded_at are illustrative; each run produces new values.
 {"record_version":"0.1.0","record_id":"7f9d0f35-1a1c-4ef4-97e4-0f4b2b7e8f54","recorded_at":"2026-06-04T18:24:11.000Z","action_kind":"tool_call","action_signature":"tool:get_weather(location_type)","vdc":{"mandate_id":"support-agent-v1","issuer":"posteria-demo","subject":"weather-tool","claims":{"tool_name":"get_weather","location_type":"city"}},"decision":"allow","decision_reason":"ledger_short_circuit","ledger_version":"0.1.1"}
 */
 ```
@@ -204,6 +205,7 @@ const ledger = createLedger({
   audit_stream_path: "./audit/shutdown.jsonl",
 });
 
+// Keep the process alive so SIGINT/SIGTERM has something to interrupt.
 const keepAlive = setInterval(() => {}, 1000);
 let closing = false;
 
@@ -296,7 +298,8 @@ await ledger.close();
 ```
 
 `enable_anon_telemetry: true` is a no-op in v0.1. It transmits nothing today;
-the flag only exposes the future opt-in surface.
+the flag only exposes the future opt-in surface. See [Telemetry](#telemetry)
+for the v0.1 design.
 
 The same knobs can be set through `POSTERIA_LEDGER_*` environment variables:
 
@@ -312,6 +315,8 @@ const auditPath =
 
 await mkdir(dirname(auditPath), { recursive: true });
 
+// createLedger() reads POSTERIA_LEDGER_* on its own; auditPath is only
+// needed here to pre-create the parent directory.
 const ledger = createLedger();
 
 ledger.record({
