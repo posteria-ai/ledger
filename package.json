@@ -1,6 +1,6 @@
 {
   "name": "@posteria/ledger",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Open, append-only record of what crosses an AI agent's I/O boundary.",
   "license": "MIT",
   "repository": {
